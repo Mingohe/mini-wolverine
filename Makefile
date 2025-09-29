@@ -16,6 +16,12 @@ help:
 	@echo "  make health    - Check service health"
 	@echo "  make test      - Run basic connectivity tests"
 	@echo ""
+	@echo "Development Helpers:"
+	@echo "  make install-backend - Install backend dependencies"
+	@echo "  make install-vue     - Install Vue frontend dependencies"
+	@echo "  make run-backend     - Run backend in development mode"
+	@echo "  make run-vue         - Run Vue frontend in development mode"
+	@echo ""
 
 # Start all services
 start:
@@ -31,7 +37,8 @@ dev:
 	docker-compose --profile development up -d
 	@echo "✅ Development environment ready!"
 	@echo "🌐 Frontend: http://localhost:8080"
-	@echo "🔄 Dev Server: http://localhost:3000 (with hot reload)"
+	@echo "🔄 React Dev Server: http://localhost:3000 (with hot reload)"
+	@echo "🔄 Vue Dev Server: http://localhost:3001 (with hot reload)"
 	@echo "📡 WebSocket: ws://localhost:3009"
 
 # Stop all services
@@ -110,9 +117,18 @@ install-backend:
 	cd backend && npm install
 	@echo "✅ Backend dependencies installed!"
 
+install-vue:
+	@echo "📦 Installing Vue frontend dependencies..."
+	cd frontend-vue && npm install
+	@echo "✅ Vue frontend dependencies installed!"
+
 run-backend:
 	@echo "🚀 Running backend in development mode..."
 	cd backend && npm run dev
+
+run-vue:
+	@echo "🚀 Running Vue frontend in development mode..."
+	cd frontend-vue && npm run dev
 
 frontend-logs:
 	docker-compose logs -f web-server

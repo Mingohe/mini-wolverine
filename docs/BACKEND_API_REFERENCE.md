@@ -9,10 +9,19 @@ The Mini Wolverine backend follows a **backend-frontend separation architecture*
 - **Backend (Node.js)**: Handles all WASM operations, Caitlyn server communication, and data processing
 - **Frontend (React)**: Pure UI layer with no WASM dependencies
 - **Communication**: REST API for static data + WebSocket for real-time operations
+- **Enhanced Connection Pool**: Conservative single-connection pool to prevent WASM conflicts
 
 ```
 Frontend (Port 3000) ↔ Backend API (Port 4000) ↔ Caitlyn Server
 ```
+
+### Key Features
+
+- **Pre-initialized Backend**: Schema, markets, and securities loaded on startup
+- **Automatic Data Delivery**: WebSocket connections receive cached data immediately
+- **Enhanced Search**: Comprehensive futures search with pagination and market filtering
+- **Robust Error Handling**: Detailed error responses with stack traces
+- **Connection Pool Management**: Conservative configuration to prevent WASM abort errors
 
 ## Base URL
 
@@ -24,6 +33,9 @@ Frontend (Port 3000) ↔ Backend API (Port 4000) ↔ Caitlyn Server
 The backend handles authentication with the Caitlyn server using environment variables:
 - `CAITLYN_TOKEN`: Required authentication token
 - `CAITLYN_WS_URL`: Caitlyn server WebSocket URL (default: `wss://116.wolverine-box.com/tm`)
+- `CAITLYN_CONNECTION_TIMEOUT`: Connection timeout in milliseconds (default: 60000)
+- `CAITLYN_RECONNECT_DELAY`: Reconnection delay in milliseconds (default: 5000)
+- `CAITLYN_MAX_RECONNECT_ATTEMPTS`: Maximum reconnection attempts (default: 2)
 
 No frontend authentication is required - the backend acts as a proxy.
 
@@ -156,25 +168,46 @@ Returns futures contracts for a specific market.
 ]
 ```
 
-#### `GET /api/futures/search/:pattern`
+#### `GET /api/futures/search`
 
-Search futures contracts by symbol or name pattern.
+Comprehensive search endpoint for futures contracts with pattern matching and market filtering.
 
-**Parameters:**
-- `pattern` (string): Search pattern
-- `market` (query, optional): Limit search to specific market
+**Query Parameters:**
+- `pattern` (string, optional): Search pattern for code, name, or abbreviation
+- `market` (string, optional): Limit search to specific market
+- `limit` (number, optional): Maximum results to return (default: 10)
+- `offset` (number, optional): Number of results to skip for pagination (default: 0)
 
-**Example:** `/api/futures/search/iron?market=DCE`
+**Examples:**
+- `/api/futures/search?pattern=iron&market=DCE`
+- `/api/futures/search?pattern=copper&limit=20`
+- `/api/futures/search?market=SHFE&offset=10&limit=5`
 
 **Response:**
 ```json
-[
-  {
-    "symbol": "i<00>",
-    "name": "Iron Ore Main Contract",
+{
+  "success": true,
+  "data": [
+    {
+      "code": "i<00>",
+      "name": "Iron Ore Main Contract",
+      "abbreviation": "IronOre",
+      "market": "DCE"
+    }
+  ],
+  "total": 1,
+  "limit": 10,
+  "offset": 0,
+  "hasMore": false,
+  "markets": ["DCE", "SHFE", "CZCE"],
+  "marketStats": {
+    "DCE": 1
+  },
+  "searchParams": {
+    "pattern": "iron",
     "market": "DCE"
   }
-]
+}
 ```
 
 ---
@@ -260,7 +293,7 @@ Queries cached universe seeds data with optional timestamp filtering.
 #### Historical Data Queries
 
 ##### `fetch_by_code`
-Fetches historical data for a specific market/code combination.
+Fetches historical data for a specific market/code combination using the enhanced WASM API.
 
 ```json
 {
@@ -284,9 +317,9 @@ Fetches historical data for a specific market/code combination.
 - `toTime` (number): End time (Unix timestamp)
 - `granularity` (number): Time granularity in seconds
 - `fields` (array): Requested field names
-- `metaName` (string): Metadata type name
-- `namespace` (string): "global" or "private"
-- `revision` (number): Schema revision (-1 for latest)
+- `metaName` (string): Metadata type name (used as qualifiedName)
+- `namespace` (string): "global" or "private" (string format, not integer)
+- `revision` (number): Schema revision (-1 for latest, optional)
 
 ##### `query_historical_by_code`
 Alternative historical data query format.
@@ -327,6 +360,102 @@ Tests universe seeds data retrieval.
   "type": "test_universe_seeds"
 }
 ```
+
+##### `query_historical_data`
+Legacy historical data query format (deprecated in favor of `fetch_by_code`).
+
+```json
+{
+  "type": "query_historical_data",
+  "params": {
+    "market": "DCE",
+    "code": "i<00>",
+    "metaID": 123,
+    "namespace": "global",
+    "metaName": "SampleQuote",
+    "granularity": 3600,
+    "startTime": 1672531200000,
+    "endTime": 1672617600000,
+    "fields": ["close", "volume"],
+    "fieldIndices": [0, 1]
+  },
+  "requestId": 1672531200000
+}
+```
+
+##### `request_historical`
+Alternative historical data request format.
+
+```json
+{
+  "type": "request_historical",
+  "params": {
+    "market": "DCE",
+    "code": "i<00>",
+    "granularity": 3600,
+    "startTime": 1672531200000,
+    "endTime": 1672617600000
+  }
+}
+```
+
+#### Real-time Subscriptions
+
+##### `subscribe`
+Subscribe to real-time data updates with automatic deduplication.
+
+```json
+{
+  "type": "subscribe",
+  "markets": ["ICE", "DCE"],
+  "codes": ["B<00>", "i<00>"],
+  "qualifiedNames": ["SampleQuote"],
+  "namespace": "global",
+  "options": {
+    "granularities": [86400],
+    "fields": ["bid", "ask", "last", "volume"]
+  },
+  "requestId": "sub_123456"
+}
+```
+
+**Parameters:**
+- `markets` (string|array): Market code(s)
+- `codes` (string|array): Security code(s)
+- `qualifiedNames` (string|array): Metadata type(s)
+- `namespace` (string): "global" or "private"
+- `options` (object): Subscription options
+  - `granularities` (array): Time granularities in seconds
+  - `fields` (array): Requested field names
+- `requestId` (string, optional): Request identifier
+
+##### `unsubscribe`
+Cancel a real-time subscription.
+
+```json
+{
+  "type": "unsubscribe",
+  "subscriberId": "sub_1234567890_abc123",
+  "requestId": "unsub_123456"
+}
+```
+
+**Parameters:**
+- `subscriberId` (string): ID returned from subscribe request
+- `requestId` (string, optional): Request identifier
+
+##### `get_subscription_stats`
+Get subscription statistics and monitoring information.
+
+```json
+{
+  "type": "get_subscription_stats",
+  "requestId": "stats_123456"
+}
+```
+
+**Parameters:**
+- `requestId` (string, optional): Request identifier
 
 ### Backend → Frontend Messages
 
@@ -407,6 +536,7 @@ Provides client connection details.
 ##### `fetch_by_code_response`
 Response to `fetch_by_code` requests.
 
+**Success Response:**
 ```json
 {
   "type": "fetch_by_code_response",
@@ -438,6 +568,20 @@ Response to `fetch_by_code` requests.
     "toTime": 1672617600,
     "granularity": 86400,
     "fieldCount": 5
+  }
+}
+```
+
+**Error Response:**
+```json
+{
+  "type": "fetch_by_code_response",
+  "success": false,
+  "message": "Error description",
+  "error": {
+    "type": "ErrorType",
+    "message": "Detailed error message",
+    "stack": "Error stack trace"
   }
 }
 ```
@@ -492,6 +636,133 @@ Response to universe seeds tests.
 }
 ```
 
+#### Real-time Subscription Responses
+
+##### `subscription_confirmed`
+Response to successful subscription requests.
+
+```json
+{
+  "type": "subscription_confirmed",
+  "subscriberId": "sub_1234567890_abc123",
+  "message": "Real-time subscription established successfully",
+  "requestId": "sub_123456",
+  "subscriptionInfo": {
+    "markets": ["ICE", "DCE"],
+    "codes": ["B<00>", "i<00>"],
+    "qualifiedNames": ["SampleQuote"],
+    "namespace": "global",
+    "options": {
+      "granularities": [86400],
+      "fields": ["bid", "ask", "last", "volume"]
+    }
+  }
+}
+```
+
+##### `subscription_error`
+Response to failed subscription requests.
+
+```json
+{
+  "type": "subscription_error",
+  "error": "Invalid market code provided",
+  "requestId": "sub_123456",
+  "details": {
+    "type": "ValidationError",
+    "message": "Invalid market code provided"
+  }
+}
+```
+
+##### `unsubscription_confirmed`
+Response to successful unsubscription requests.
+
+```json
+{
+  "type": "unsubscription_confirmed",
+  "subscriberId": "sub_1234567890_abc123",
+  "message": "Subscription cancelled successfully",
+  "requestId": "unsub_123456"
+}
+```
+
+##### `unsubscription_error`
+Response to failed unsubscription requests.
+
+```json
+{
+  "type": "unsubscription_error",
+  "error": "Subscriber not found or already unsubscribed",
+  "subscriberId": "sub_1234567890_abc123",
+  "requestId": "unsub_123456"
+}
+```
+
+##### `real_time_data`
+Real-time data updates from active subscriptions.
+
+```json
+{
+  "type": "real_time_data",
+  "data": {
+    "market": "ICE",
+    "code": "B<00>",
+    "metaName": "global::SampleQuote",
+    "namespace": "global",
+    "fields": {
+      "bid": 95.25,
+      "ask": 95.30,
+      "last": 95.28,
+      "volume": 1250
+    },
+    "timestamp": "1672531200000",
+    "receivedAt": "2025-01-01T12:00:00.000Z"
+  },
+  "subscriberId": "sub_1234567890_abc123",
+  "timestamp": "2025-01-01T12:00:00.000Z"
+}
+```
+
+##### `subscription_stats`
+Response to subscription statistics requests.
+
+```json
+{
+  "type": "subscription_stats",
+  "data": {
+    "activeSubscriptions": 3,
+    "totalSubscribers": 5,
+    "messagesReceived": 1250,
+    "uptime": 3600,
+    "subscriptions": [
+      {
+        "key": "ICE|B<00>|SampleQuote|global|{}",
+        "subscriberCount": 2,
+        "markets": ["ICE"],
+        "codes": ["B<00>"],
+        "qualifiedNames": ["SampleQuote"],
+        "namespace": "global",
+        "createdAt": "2025-01-01T10:00:00.000Z"
+      }
+    ]
+  },
+  "message": "Subscription statistics retrieved successfully",
+  "requestId": "stats_123456"
+}
+```
+
+##### `subscription_stats_error`
+Response to failed subscription statistics requests.
+
+```json
+{
+  "type": "subscription_stats_error",
+  "error": "Subscription hub not available",
+  "requestId": "stats_123456"
+}
+```
+
 #### Error Messages
 
 All error responses follow this format:
@@ -541,6 +812,13 @@ interface SecurityData {
   codes: string[];             // Array of security codes
   names: string[];             // Array of security names
 }
+
+interface FuturesContract {
+  code: string;                // Contract code (e.g., "i<00>")
+  name: string;                // Contract name
+  abbreviation?: string;       // Contract abbreviation
+  market: string;              // Market code (e.g., "DCE", "SHFE")
+}
 ```
 
 ### Schema Definition
@@ -555,6 +833,26 @@ interface FieldDefinition {
   name: string;                // Field name
   type: string;                // Field type
   index?: number;              // Field index
+}
+
+### Search Response
+
+```typescript
+interface SearchResponse {
+  success: boolean;            // Request success status
+  data: FuturesContract[];     // Array of matching contracts
+  total: number;               // Total number of matches
+  limit: number;               // Results per page
+  offset: number;              // Results offset
+  hasMore: boolean;            // Whether more results available
+  markets: string[];           // Available market codes
+  marketStats: {               // Results count per market
+    [marketCode: string]: number;
+  };
+  searchParams: {              // Original search parameters
+    pattern?: string;
+    market?: string;
+  };
 }
 ```
 
@@ -596,8 +894,10 @@ interface FieldDefinition {
 ### Connection Pool
 
 - **Single Connection**: Backend uses 1 connection to prevent WASM conflicts
-- **Pre-initialization**: Schema and markets loaded on startup
+- **Pre-initialization**: Schema, markets, and securities loaded on startup
 - **Shared State**: All clients share cached data for efficiency
+- **Enhanced Pool**: Uses CaitlynConnectionPool with conservative configuration
+- **Automatic Data Delivery**: Schema, markets, and securities sent immediately on WebSocket connection
 
 ### Data Limits
 
@@ -610,7 +910,9 @@ interface FieldDefinition {
 - **Schema**: Cached permanently until restart
 - **Markets**: Cached permanently until restart  
 - **Securities**: Cached permanently until restart
+- **Futures Data**: Cached permanently until restart
 - **Historical Data**: Not cached (real-time requests)
+- **Global Cached Seeds**: Shared across all client connections
 
 ---
 
@@ -622,7 +924,13 @@ interface FieldDefinition {
 // WebSocket connection
 const ws = new WebSocket('ws://localhost:4000');
 
-// Request historical data
+// Handle connection and automatic data delivery
+ws.onopen = () => {
+  console.log('Connected to backend');
+  // Backend automatically sends schema, markets, and securities data
+};
+
+// Request historical data using the enhanced API
 ws.send(JSON.stringify({
   type: 'fetch_by_code',
   market: 'DCE',
@@ -632,20 +940,94 @@ ws.send(JSON.stringify({
   granularity: 3600,
   fields: ['open', 'close', 'high', 'low', 'volume'],
   metaName: 'SampleQuote',
-  namespace: 'global'
+  namespace: 'global',
+  revision: -1
 }));
 
-// Handle response
+// Handle all message types
 ws.onmessage = (event) => {
   const data = JSON.parse(event.data);
   
-  if (data.type === 'fetch_by_code_response') {
-    if (data.success) {
-      console.log('Historical data:', data.data.records);
-    } else {
-      console.error('Error:', data.error);
-    }
+  switch (data.type) {
+    case 'connection_status':
+      console.log('Connection status:', data.status, data.message);
+      break;
+      
+    case 'schema_received':
+      console.log('Schema loaded:', data.data);
+      break;
+      
+    case 'markets_received':
+      console.log('Markets loaded:', data.data);
+      break;
+      
+    case 'securities_received':
+      console.log('Securities loaded:', data.data);
+      break;
+      
+    case 'fetch_by_code_response':
+      if (data.success) {
+        console.log('Historical data:', data.data.records);
+        console.log('Query params:', data.queryParams);
+      } else {
+        console.error('Error:', data.error);
+      }
+      break;
+      
+    case 'subscription_confirmed':
+      console.log('Subscription established:', data.subscriberId);
+      console.log('Subscription info:', data.subscriptionInfo);
+      break;
+      
+    case 'subscription_error':
+      console.error('Subscription error:', data.error);
+      break;
+      
+    case 'real_time_data':
+      console.log('Real-time data received:', data.data);
+      console.log('From subscriber:', data.subscriberId);
+      break;
+      
+    case 'unsubscription_confirmed':
+      console.log('Unsubscribed successfully:', data.subscriberId);
+      break;
+      
+    case 'subscription_stats':
+      console.log('Subscription statistics:', data.data);
+      break;
+      
+    default:
+      console.log('Received message:', data.type, data);
   }
+};
+
+// Subscribe to real-time data
+ws.send(JSON.stringify({
+  type: 'subscribe',
+  markets: ['ICE', 'DCE'],
+  codes: ['B<00>', 'i<00>'],
+  qualifiedNames: ['SampleQuote'],
+  namespace: 'global',
+  options: {
+    granularities: [86400],
+    fields: ['bid', 'ask', 'last', 'volume']
+  },
+  requestId: 'sub_' + Date.now()
+}));
+
+// Get subscription statistics
+ws.send(JSON.stringify({
+  type: 'get_subscription_stats',
+  requestId: 'stats_' + Date.now()
+}));
+
+// Handle connection errors
+ws.onerror = (error) => {
+  console.error('WebSocket error:', error);
+};
+
+ws.onclose = () => {
+  console.log('WebSocket connection closed');
 };
 ```
 
@@ -655,14 +1037,22 @@ ws.onmessage = (event) => {
 // Fetch available markets
 const marketsResponse = await fetch('http://localhost:4000/api/futures/markets');
 const markets = await marketsResponse.json();
+console.log('Available markets:', markets);
 
 // Get securities for a specific market
 const securitiesResponse = await fetch(`http://localhost:4000/api/futures/${markets[0]}`);
 const securities = await securitiesResponse.json();
+console.log('Securities for market:', securities);
 
-// Search for specific contracts
-const searchResponse = await fetch('http://localhost:4000/api/futures/search/iron?market=DCE');
+// Search for specific contracts with pagination
+const searchResponse = await fetch('http://localhost:4000/api/futures/search?pattern=iron&market=DCE&limit=10&offset=0');
 const searchResults = await searchResponse.json();
+console.log('Search results:', searchResults);
+
+// Search across all markets
+const allMarketsSearch = await fetch('http://localhost:4000/api/futures/search?pattern=copper&limit=20');
+const allResults = await allMarketsSearch.json();
+console.log('Cross-market search:', allResults);
 ```
 
 ---

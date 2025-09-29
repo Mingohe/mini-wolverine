@@ -58,3 +58,5 @@ coverage/
 *.bak
 *.orig
 *.backup
+
+v1/*

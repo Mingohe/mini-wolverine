@@ -34,19 +34,18 @@ export default class CaitlynSubscriptionHub {
    * Subscribe to real-time data with automatic deduplication
    * @param {string|string[]} markets - Market codes (e.g., 'ICE' or ['ICE', 'DCE'])
    * @param {string|string[]} codes - Security codes (e.g., 'B<00>' or ['B<00>', 'i<00>'])
-   * @param {string|string[]} qualifiedNames - Metadata types (e.g., 'SampleQuote' or ['SampleQuote', 'Market'])
-   * @param {string} namespace - 'global' or 'private'
+   * @param {string|string[]} qualifiedNames - Fully qualified metadata types (e.g., 'global::SampleQuote' or ['global::SampleQuote', 'private::Market'])
    * @param {Function} callback - Data callback function
    * @param {Object} options - Subscription options
    * @returns {string} subscriber ID for unsubscribing
    */
-  subscribe(markets, codes, qualifiedNames, namespace = 'global', callback, options = {}) {
+  subscribe(markets, codes, qualifiedNames, callback, options = {}) {
     if (typeof callback !== 'function') {
       throw new Error('Callback must be a function');
     }
 
     // Generate unique subscription key for deduplication
-    const subscriptionKey = this.generateSubscriptionKey(markets, codes, qualifiedNames, namespace, options);
+    const subscriptionKey = this.generateSubscriptionKey(markets, codes, qualifiedNames, options);
     const subscriberId = this.generateSubscriberId();
     
     this.logger.debug(`🎯 Hub: Processing subscription request - Key: ${subscriptionKey}`);
@@ -60,21 +59,25 @@ export default class CaitlynSubscriptionHub {
     
     // Create actual subscription only if not exists
     if (!this.activeSubscriptions.has(subscriptionKey)) {
-      this.logger.info(`📡 Hub: Creating new subscription - ${subscriptionKey}`);
-      
+      this.logger.info(`📡 [HUB] Creating new subscription - ${subscriptionKey}`);
+      this.logger.info(`📡 [HUB] Subscription parameters:`);
+      this.logger.info(`   📊 Markets: [${Array.isArray(markets) ? markets.join(', ') : markets}]`);
+      this.logger.info(`   🏷️ Codes: [${Array.isArray(codes) ? codes.join(', ') : codes}]`);
+      this.logger.info(`   🧬 Qualified Names: [${Array.isArray(qualifiedNames) ? qualifiedNames.join(', ') : qualifiedNames}]`);
+      this.logger.info(`   ⚙️ Options:`, JSON.stringify(options, null, 2));
+
       try {
         const internalKey = this.connection.subscribe(
-          markets, codes, qualifiedNames, namespace,
+          markets, codes, qualifiedNames,
           (data) => this.broadcastToSubscribers(subscriptionKey, data),
           options
         );
-        
+
         this.activeSubscriptions.set(subscriptionKey, {
           internalKey,
           markets: Array.isArray(markets) ? markets : [markets],
           codes: Array.isArray(codes) ? codes : [codes],
           qualifiedNames: Array.isArray(qualifiedNames) ? qualifiedNames : [qualifiedNames],
-          namespace,
           options,
           subscriberCount: 1,
           createdAt: new Date()
@@ -204,24 +207,23 @@ export default class CaitlynSubscriptionHub {
 
   /**
    * Generate unique subscription key for deduplication
-   * @param {*} markets 
-   * @param {*} codes 
-   * @param {*} qualifiedNames 
-   * @param {*} namespace 
-   * @param {*} options 
+   * @param {*} markets
+   * @param {*} codes
+   * @param {*} qualifiedNames - Fully qualified names including namespace (e.g., 'global::SampleQuote')
+   * @param {*} options
    * @returns {string} subscription key
    */
-  generateSubscriptionKey(markets, codes, qualifiedNames, namespace, options) {
+  generateSubscriptionKey(markets, codes, qualifiedNames, options) {
     const marketStr = Array.isArray(markets) ? markets.sort().join(',') : markets;
     const codeStr = Array.isArray(codes) ? codes.sort().join(',') : codes;
     const qnameStr = Array.isArray(qualifiedNames) ? qualifiedNames.sort().join(',') : qualifiedNames;
-    
+
     // Create deterministic options string (exclude callback-specific options)
     const optsCopy = { ...options };
     delete optsCopy.callback; // Remove callback if present
     const optsStr = JSON.stringify(optsCopy, Object.keys(optsCopy).sort());
-    
-    return `${marketStr}|${codeStr}|${qnameStr}|${namespace}|${optsStr}`;
+
+    return `${marketStr}|${codeStr}|${qnameStr}|${optsStr}`;
   }
 
   /**

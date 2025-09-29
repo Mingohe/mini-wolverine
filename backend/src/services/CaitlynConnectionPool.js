@@ -37,11 +37,12 @@ class CaitlynConnectionPool extends EventEmitter {
     this.token = null;
     this.isShuttingDown = false;
     this.isInitialized = false;
-    
+
     // Shared data from first connection
     this.sharedSchema = null;
     this.sharedMarkets = null;
     this.sharedSecurities = null;
+    this.sharedFutures = null;
   }
 
   /**
@@ -135,11 +136,13 @@ class CaitlynConnectionPool extends EventEmitter {
         this.sharedSchema = initializedConnection.schema;
         this.sharedMarkets = initializedConnection.marketsData;
         this.sharedSecurities = initializedConnection.securitiesByMarket;
+        this.sharedFutures = initializedConnection.futures;
         
         logger.info(`📊 Shared data captured from connection ${connectionId}`);
         logger.info(`   Schema objects: ${Object.keys(this.sharedSchema).reduce((sum, ns) => sum + Object.keys(this.sharedSchema[ns] || {}).length, 0)}`);
         logger.info(`   Markets: ${Object.keys(this.sharedMarkets.global || {}).length} global, ${Object.keys(this.sharedMarkets.private || {}).length} private`);
         logger.info(`   Securities: ${Object.keys(this.sharedSecurities).length} markets`);
+        logger.info(`   Futures: ${this.sharedFutures?.length || 0} contracts`);
       }
       
       logger.info(`✅ Connection ${connectionId} added to pool (${this.connections.size} total)`);
@@ -213,17 +216,19 @@ class CaitlynConnectionPool extends EventEmitter {
    * Handle connection error
    */
   handleConnectionError(connectionId, error) {
+    logger.error(`❌ Connection ${connectionId} error: ${error.message}`);
+
+    // Force cleanup and removal
     this.removeConnection(connectionId);
     this.emit('connection_error', connectionId, error);
-    
-    // DISABLED: Prevent infinite reconnection loops during WASM failures
-    // if (!this.isShuttingDown) {
-    //   setTimeout(() => {
-    //     this.attemptReconnection(connectionId);
-    //   }, this.reconnectDelay);
-    // }
-    
-    logger.error(`❌ Connection error disabled reconnection to prevent loops: ${error.message}`);
+
+    // If we have no available connections, attempt emergency recovery
+    if (this.availableConnections.size === 0 && !this.isShuttingDown) {
+      logger.warn(`🚨 No available connections after error - attempting emergency recovery`);
+      setTimeout(() => {
+        this.attemptEmergencyRecovery();
+      }, this.reconnectDelay);
+    }
   }
 
   /**
@@ -244,11 +249,50 @@ class CaitlynConnectionPool extends EventEmitter {
   }
 
   /**
-   * Attempt to reconnect a failed connection - DISABLED
+   * Attempt emergency recovery when all connections are lost
+   */
+  async attemptEmergencyRecovery() {
+    if (this.isShuttingDown) {
+      return;
+    }
+
+    logger.info(`🆘 Attempting emergency recovery - creating single new connection`);
+
+    try {
+      // Try to create one new connection
+      const newConnection = await this.createConnection('./public/caitlyn_js.js', './public/caitlyn_js.wasm');
+
+      if (newConnection) {
+        logger.info(`✅ Emergency recovery successful - created connection ${newConnection.poolConnectionId}`);
+
+        // Process any pending requests
+        while (this.pendingRequests.length > 0 && this.availableConnections.size > 0) {
+          const request = this.pendingRequests.shift();
+          const connectionId = this.availableConnections.values().next().value;
+          const connection = this.connections.get(connectionId);
+
+          if (connection && connection.isInitialized) {
+            this.availableConnections.delete(connectionId);
+            this.busyConnections.add(connectionId);
+            request.resolve({ connection, connectionId });
+          } else {
+            request.reject(new Error('Emergency connection not ready'));
+          }
+        }
+      } else {
+        logger.error(`❌ Emergency recovery failed - could not create new connection`);
+      }
+    } catch (error) {
+      logger.error(`❌ Emergency recovery failed:`, error);
+    }
+  }
+
+  /**
+   * Attempt to reconnect a failed connection - DISABLED for safety
    */
   async attemptReconnection(connectionId) {
-    logger.warn(`🚫 Reconnection disabled for ${connectionId} to prevent WASM conflicts`);
-    // DISABLED: All reconnection attempts disabled to prevent WASM memory corruption
+    logger.warn(`🚫 Direct reconnection disabled for ${connectionId} to prevent WASM conflicts`);
+    // Use emergency recovery instead for safer memory management
     return;
   }
 
@@ -279,41 +323,59 @@ class CaitlynConnectionPool extends EventEmitter {
       if (this.availableConnections.size > 0) {
         const connectionId = this.availableConnections.values().next().value;
         const connection = this.connections.get(connectionId);
-        
+
         if (connection && connection.isInitialized) {
           // Move to busy
           this.availableConnections.delete(connectionId);
           this.busyConnections.add(connectionId);
-          
+
           resolve({ connection, connectionId });
           return;
         }
       }
 
-      // DISABLED: No pool expansion to prevent WASM conflicts after crash
-      // if (this.connections.size < this.maxPoolSize) {
-      //   logger.info(`📈 Pool expansion: creating connection ${this.connections.size + 1}/${this.maxPoolSize}`);
-      //   
-      //   this.createConnection('./public/caitlyn_js.js', './public/caitlyn_js.wasm')
-      //     .then(connection => {
-      //       if (connection) {
-      //         const connectionId = connection.poolConnectionId;
-      //         
-      //         // Move to busy immediately
-      //         this.availableConnections.delete(connectionId);
-      //         this.busyConnections.add(connectionId);
-      //         
-      //         resolve({ connection, connectionId });
-      //       } else {
-      //         reject(new Error('Failed to create new connection'));
-      //       }
-      //     })
-      //     .catch(reject);
-      //   return;
-      // }
+      // Attempt pool expansion if we have fewer than max connections
+      if (this.connections.size < this.maxPoolSize && !this.isShuttingDown) {
+        logger.info(`📈 Pool expansion: creating connection ${this.connections.size + 1}/${this.maxPoolSize}`);
 
-      // No available connections and expansion disabled
-      reject(new Error('No available connections in pool and expansion disabled after WASM crash'));
+        this.createConnection('./public/caitlyn_js.js', './public/caitlyn_js.wasm')
+          .then(connection => {
+            if (connection) {
+              const connectionId = connection.poolConnectionId;
+
+              // Move to busy immediately
+              this.availableConnections.delete(connectionId);
+              this.busyConnections.add(connectionId);
+
+              resolve({ connection, connectionId });
+            } else {
+              reject(new Error('Failed to create new connection during expansion'));
+            }
+          })
+          .catch(error => {
+            logger.error('Pool expansion failed:', error);
+            reject(error);
+          });
+        return;
+      }
+
+      // Queue the request with timeout
+      const requestTimeout = setTimeout(() => {
+        const index = this.pendingRequests.findIndex(req => req.resolve === resolve);
+        if (index > -1) {
+          this.pendingRequests.splice(index, 1);
+        }
+        reject(new Error('Connection request timed out - no connections available'));
+      }, 10000); // 10 second timeout
+
+      this.pendingRequests.push({
+        resolve,
+        reject,
+        timestamp: Date.now(),
+        timeout: requestTimeout
+      });
+
+      logger.debug(`📋 Request queued (${this.pendingRequests.length} pending)`);
     });
   }
 
@@ -341,12 +403,17 @@ class CaitlynConnectionPool extends EventEmitter {
       if (this.pendingRequests.length > 0) {
         const request = this.pendingRequests.shift();
         const connection = this.connections.get(connectionId);
-        
+
+        // Clear the timeout since we're processing the request
+        if (request.timeout) {
+          clearTimeout(request.timeout);
+        }
+
         if (connection && connection.isInitialized) {
           // Move back to busy
           this.availableConnections.delete(connectionId);
           this.busyConnections.add(connectionId);
-          
+
           request.resolve({ connection, connectionId });
         } else {
           // Connection not ready, reject the request
@@ -367,6 +434,26 @@ class CaitlynConnectionPool extends EventEmitter {
       const result = await connection.fetchByCode(market, code, options);
       return result;
       
+    } catch (error) {
+      throw error;
+    } finally {
+      // Release connection back to pool
+      this.releaseConnection(connectionId);
+    }
+  }
+
+  /**
+   * Execute a fetch by time request using the pool
+   * Fetches data for multiple securities at a specific time point
+   */
+  async executeFetchByTime(markets, codes, timeTag, options = {}) {
+    const { connection, connectionId } = await this.getConnection();
+
+    try {
+      // CaitlynClientConnection.fetchByTime() returns a Promise with decoded data
+      const result = await connection.fetchByTime(markets, codes, timeTag, options);
+      return result;
+
     } catch (error) {
       throw error;
     } finally {
@@ -431,6 +518,13 @@ class CaitlynConnectionPool extends EventEmitter {
   }
 
   /**
+   * Get shared futures data from the first connection
+   */
+  getSharedFutures() {
+    return this.sharedFutures;
+  }
+
+  /**
    * Get pool statistics
    */
   getStats() {
@@ -453,8 +547,11 @@ class CaitlynConnectionPool extends EventEmitter {
     this.isShuttingDown = true;
     logger.info('🛑 Shutting down CaitlynConnectionPool...');
     
-    // Reject pending requests
+    // Reject pending requests and clear timeouts
     for (const request of this.pendingRequests) {
+      if (request.timeout) {
+        clearTimeout(request.timeout);
+      }
       request.reject(new Error('Connection pool is shutting down'));
     }
     this.pendingRequests = [];
@@ -483,11 +580,73 @@ class CaitlynConnectionPool extends EventEmitter {
     this.sharedSchema = null;
     this.sharedMarkets = null;
     this.sharedSecurities = null;
+    this.sharedFutures = null;
     this.isInitialized = false;
     
     logger.info('✅ Connection pool shutdown complete');
     this.emit('pool_shutdown');
   }
+
+  /**
+   * Execute formula registration using the pool
+   * @param {number} formulaId - Formula ID
+   * @param {string} sourceCode - Formula source code
+   * @param {number} languageId - Language ID (usually 5)
+   * @returns {Promise<Object>} Registration result with UUID
+   */
+  async executeFormulaRegistration(formulaId, sourceCode, languageId = 5) {
+    if (!this.isInitialized) {
+      throw new Error('Connection pool not initialized');
+    }
+
+    logger.info(`🧮 Executing formula registration for formula ${formulaId}`);
+    
+    const { connection, connectionId } = await this.getConnection();
+    
+    try {
+      const result = await connection.registerFormula(formulaId, sourceCode, languageId);
+      logger.debug(`✅ Formula registration completed for formula ${formulaId}`);
+      return result;
+    } catch (error) {
+      logger.error(`❌ Formula registration failed for formula ${formulaId}:`, error);
+      throw error;
+    } finally {
+      this.releaseConnection(connectionId);
+    }
+  }
+
+  /**
+   * Execute formula calculation using the pool
+   * @param {string} uuid - Formula UUID from registration
+   * @param {string} market - Market code
+   * @param {string} code - Security code
+   * @param {number} granularity - Time granularity in seconds
+   * @param {number} beginTime - Begin timestamp
+   * @param {number} endTime - End timestamp
+   * @param {boolean} isRealTime - Whether this is real-time calculation
+   * @returns {Promise<Object>} Calculation result
+   */
+  async executeFormulaCalculation(uuid, market, code, granularity, beginTime, endTime, isRealTime = false) {
+    if (!this.isInitialized) {
+      throw new Error('Connection pool not initialized');
+    }
+
+    logger.info(`🧮 Executing formula calculation for ${market}/${code}`);
+
+    const { connection, connectionId } = await this.getConnection();
+
+    try {
+      const result = await connection.calculateFormula(uuid, market, code, granularity, beginTime, endTime, isRealTime);
+      logger.debug(`✅ Formula calculation completed for ${market}/${code}`);
+      return result;
+    } catch (error) {
+      logger.error(`❌ Formula calculation failed for ${market}/${code}:`, error);
+      throw error;
+    } finally {
+      this.releaseConnection(connectionId);
+    }
+  }
+
 }
 
 export default CaitlynConnectionPool;

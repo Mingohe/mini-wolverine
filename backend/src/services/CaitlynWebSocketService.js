@@ -164,6 +164,25 @@ class CaitlynWebSocketService {
   }
 
   /**
+   * Execute fetch by time using the pool
+   * Fetches data for multiple securities at a specific time point
+   */
+  async fetchByTime(markets, codes, timeTag, options = {}) {
+    if (!this.connectionPool) {
+      throw new Error('Connection pool not initialized');
+    }
+
+    try {
+      const result = await this.connectionPool.executeFetchByTime(markets, codes, timeTag, options);
+      logger.info(`✅ Fetch by time completed for ${Array.isArray(markets) ? markets.join(',') : markets}/${Array.isArray(codes) ? codes.join(',') : codes}`);
+      return result;
+    } catch (error) {
+      logger.error(`❌ Fetch by time failed for ${Array.isArray(markets) ? markets.join(',') : markets}/${Array.isArray(codes) ? codes.join(',') : codes}:`, error);
+      throw error;
+    }
+  }
+
+  /**
    * Execute fetch by time range using the pool
    */
   async fetchByTimeRange(market, code, options = {}) {
@@ -196,6 +215,61 @@ class CaitlynWebSocketService {
     return this.sharedSecurities || this.connectionPool?.getSharedSecurities();
   }
 
+  /**
+   * Get shared futures data
+   */
+  getSharedFutures() {
+    return this.connectionPool?.getSharedFutures();
+  }
+
+  /**
+   * Register a formula with Caitlyn server
+   * @param {number} formulaId - Formula ID
+   * @param {string} sourceCode - Formula source code
+   * @param {number} languageId - Language ID (usually 5)
+   * @returns {Promise<Object>} Registration result with UUID
+   */
+  async registerFormula(formulaId, sourceCode, languageId = 5) {
+    if (!this.connectionPool) {
+      throw new Error('Connection pool not initialized');
+    }
+    
+    try {
+      const result = await this.connectionPool.executeFormulaRegistration(formulaId, sourceCode, languageId);
+      logger.info(`✅ Formula registration completed for formula ${formulaId}`);
+      return result;
+    } catch (error) {
+      logger.error(`❌ Formula registration failed for formula ${formulaId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Calculate formula data
+   * @param {string} uuid - Formula UUID from registration
+   * @param {string} market - Market code
+   * @param {string} code - Security code
+   * @param {number} granularity - Time granularity in seconds
+   * @param {number} beginTime - Begin timestamp
+   * @param {number} endTime - End timestamp
+   * @param {boolean} isRealTime - Whether this is real-time calculation
+   * @returns {Promise<Object>} Calculation result
+   */
+  async calculateFormula(uuid, market, code, granularity, beginTime, endTime, isRealTime = false) {
+    if (!this.connectionPool) {
+      throw new Error('Connection pool not initialized');
+    }
+    
+    try {
+      const result = await this.connectionPool.executeFormulaCalculation(uuid, market, code, granularity, beginTime, endTime, isRealTime);
+      logger.info(`✅ Formula calculation completed for ${market}/${code}`);
+      return result;
+    } catch (error) {
+      logger.error(`❌ Formula calculation failed for ${market}/${code}:`, error);
+      throw error;
+    }
+  }
+
   createClientHandler(frontendWs) {
     const client = new ClientHandler(frontendWs, this.poolConfig, this);
     this.clients.add(client);
@@ -208,22 +282,107 @@ class CaitlynWebSocketService {
 
   async resetConfiguration() {
     logger.info('Resetting enhanced pool configuration...');
-    
+
     if (this.connectionPool) {
       await this.connectionPool.shutdown();
     }
-    
+
     this.connectionPool = null;
     this.isPoolInitialized = false;
     this.currentUrl = null;
     this.globalToken = null;
-    
+
     // Clear shared data
     this.sharedSchema = null;
     this.sharedMarkets = null;
     this.sharedSecurities = null;
-    
+
     logger.info('Enhanced pool configuration reset complete');
+  }
+
+  /**
+   * Get comprehensive health status including pool statistics
+   */
+  getHealthStatus() {
+    const status = {
+      service: {
+        isPoolInitialized: this.isPoolInitialized,
+        connectedClients: this.clients.size,
+        hasSharedData: !!(this.sharedSchema && this.sharedMarkets)
+      },
+      pool: null,
+      memory: {
+        nodeMemory: process.memoryUsage(),
+        timestamp: new Date().toISOString()
+      }
+    };
+
+    if (this.connectionPool) {
+      status.pool = this.connectionPool.getStats();
+    }
+
+    return status;
+  }
+
+  /**
+   * Perform health check and log warnings for potential issues
+   */
+  performHealthCheck() {
+    const health = this.getHealthStatus();
+
+    // Check for memory issues
+    const memoryMB = health.memory.nodeMemory.heapUsed / (1024 * 1024);
+    if (memoryMB > 500) { // 500MB threshold
+      logger.warn(`⚠️ High memory usage: ${memoryMB.toFixed(2)}MB`);
+    }
+
+    // Check pool health
+    if (health.pool) {
+      if (health.pool.availableConnections === 0 && health.pool.totalConnections > 0) {
+        logger.warn(`⚠️ No available connections in pool (${health.pool.busyConnections} busy)`);
+      }
+
+      if (health.pool.pendingRequests > 5) {
+        logger.warn(`⚠️ High number of pending requests: ${health.pool.pendingRequests}`);
+      }
+
+      if (health.pool.totalConnections === 0) {
+        logger.error(`❌ No connections in pool - service degraded`);
+      }
+    }
+
+    // Check shared data
+    if (this.isPoolInitialized && !health.service.hasSharedData) {
+      logger.warn(`⚠️ Pool initialized but missing shared data`);
+    }
+
+    return health;
+  }
+
+  /**
+   * Start periodic health monitoring
+   */
+  startHealthMonitoring(intervalMs = 30000) {
+    if (this.healthMonitorInterval) {
+      clearInterval(this.healthMonitorInterval);
+    }
+
+    this.healthMonitorInterval = setInterval(() => {
+      this.performHealthCheck();
+    }, intervalMs);
+
+    logger.info(`🏥 Health monitoring started (every ${intervalMs/1000}s)`);
+  }
+
+  /**
+   * Stop health monitoring
+   */
+  stopHealthMonitoring() {
+    if (this.healthMonitorInterval) {
+      clearInterval(this.healthMonitorInterval);
+      this.healthMonitorInterval = null;
+      logger.info(`🏥 Health monitoring stopped`);
+    }
   }
 }
 
@@ -235,6 +394,7 @@ class ClientHandler {
     this.token = null;
     this.isConnected = false;
     this.clientId = Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+    this.activeSubscriptions = new Set(); // 跟踪此客户端的所有订阅
   }
 
   async connectToCaitlyn(url, token, autoConnect = false) {
@@ -415,12 +575,106 @@ class ClientHandler {
     return limited;
   }
 
+  /**
+   * Subscribe to real-time data using the subscription hub
+   * @param {Array|string} markets - Market codes
+   * @param {Array|string} codes - Security codes
+   * @param {Array|string} qualifiedNames - Qualified names
+   * @param {string} namespace - Namespace (default: 'global')
+   * @param {Function} callback - Callback function for real-time data
+   * @param {Object} options - Subscription options
+   * @returns {Promise<string>} subscriber ID
+   */
+  async subscribeHub(markets, codes, qualifiedNames, namespace = 'global', callback, options = {}) {
+    if (!this.isConnected) {
+      throw new Error('Not connected to Caitlyn server');
+    }
+
+    if (!this.caitlynService.connectionPool) {
+      throw new Error('Connection pool not initialized');
+    }
+
+    // Properly acquire and release connection from pool
+    const { connection, connectionId } = await this.caitlynService.connectionPool.getConnection();
+
+    try {
+      const subscriberId = connection.subscribeHub(markets, codes, qualifiedNames, namespace, callback, options);
+
+      // 记录此客户端的订阅
+      this.activeSubscriptions.add(subscriberId);
+      logger.info(`📝 Client ${this.clientId} recorded subscription: ${subscriberId}`);
+
+      return subscriberId;
+    } finally {
+      // Always release the connection back to the pool
+      this.caitlynService.connectionPool.releaseConnection(connectionId);
+    }
+  }
+
+  /**
+   * Unsubscribe from real-time data
+   * @param {string} subscriberId - Subscriber ID returned from subscribeHub
+   * @returns {Promise<boolean>} true if successfully unsubscribed
+   */
+  async unsubscribeHub(subscriberId) {
+    if (!this.isConnected) {
+      return false;
+    }
+
+    if (!this.caitlynService.connectionPool) {
+      return false;
+    }
+
+    try {
+      // Properly acquire and release connection from pool
+      const { connection, connectionId } = await this.caitlynService.connectionPool.getConnection();
+      
+      try {
+        const success = connection.unsubscribeHub(subscriberId);
+
+        // 如果取消订阅成功，从客户端记录中移除
+        if (success) {
+          this.activeSubscriptions.delete(subscriberId);
+          logger.info(`📝 Client ${this.clientId} removed subscription: ${subscriberId}`);
+        }
+
+        return success;
+      } finally {
+        // Always release the connection back to the pool
+        this.caitlynService.connectionPool.releaseConnection(connectionId);
+      }
+    } catch (error) {
+      logger.error('Error in unsubscribeHub:', error);
+      return false;
+    }
+  }
+
   async cleanup() {
+    logger.info(`🧹 Client ${this.clientId} cleanup started - ${this.activeSubscriptions.size} active subscriptions`);
+
+    // 清理所有此客户端的订阅
+    if (this.activeSubscriptions.size > 0) {
+      const subscriptionsToCleanup = Array.from(this.activeSubscriptions);
+
+      for (const subscriberId of subscriptionsToCleanup) {
+        try {
+          await this.unsubscribeHub(subscriberId);
+          logger.info(`✅ Cleaned up subscription: ${subscriberId}`);
+        } catch (error) {
+          logger.error(`❌ Failed to cleanup subscription ${subscriberId}:`, error);
+          // 即使失败也从记录中移除，避免重复尝试
+          this.activeSubscriptions.delete(subscriberId);
+        }
+      }
+    }
+
     // Remove client from service's client list
     if (this.caitlynService) {
       this.caitlynService.removeClient(this);
     }
+
     await this.disconnect();
+    logger.info(`✅ Client ${this.clientId} cleanup completed`);
   }
   
   /**

@@ -38,3 +38,23 @@ services:
     stdin_open: true
     tty: true
     restart: unless-stopped
+
+  # Vue Development Server
+  vue-app:
+    build:
+      context: ./frontend-vue
+      dockerfile: Dockerfile.dev
+    container_name: mini-wolverine-vue-dev
+    ports:
+      - "3001:3001"
+    environment:
+      - VITE_BACKEND_WS_URL=ws://localhost:4000
+    volumes:
+      - ./frontend-vue/src:/app/src
+      - ./frontend-vue/public:/app/public
+      - /app/node_modules
+    depends_on:
+      - backend
+    stdin_open: true
+    tty: true
+    restart: unless-stopped
