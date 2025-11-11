@@ -11,6 +11,9 @@ services:
       - PORT=4000
       - LOG_LEVEL=info
       - CAITLYN_WS_URL=wss://116.wolverine-box.com/tm
+      # ⚠️ 重要：请设置你的实际 CAITLYN_TOKEN
+      # 可以通过环境变量设置：export CAITLYN_TOKEN=your_token_here
+      # 或创建 .env 文件：echo "CAITLYN_TOKEN=your_token_here" > .env
       - CAITLYN_TOKEN=${CAITLYN_TOKEN}
     volumes:
       - ./backend/src:/app/src
@@ -46,7 +49,7 @@ services:
       dockerfile: Dockerfile.dev
     container_name: mini-wolverine-vue-dev
     ports:
-      - "3001:3001"
+      - "3002:3002"
     environment:
       - VITE_BACKEND_WS_URL=ws://localhost:4000
     volumes:

@@ -26,7 +26,7 @@ help:
 # Start all services
 start:
 	@echo "🚀 Starting Mini Wolverine services..."
-	docker-compose up -d
+	docker compose up -d
 	@echo "✅ Services started!"
 	@echo "🌐 Frontend: http://localhost:8080"
 	@echo "📡 WebSocket: ws://localhost:3009"
@@ -34,7 +34,7 @@ start:
 # Development mode with hot reload
 dev:
 	@echo "🛠️  Starting Mini Wolverine in development mode..."
-	docker-compose --profile development up -d
+	docker compose --profile development up -d
 	@echo "✅ Development environment ready!"
 	@echo "🌐 Frontend: http://localhost:8080"
 	@echo "🔄 React Dev Server: http://localhost:3000 (with hot reload)"
@@ -44,7 +44,7 @@ dev:
 # Stop all services
 stop:
 	@echo "🛑 Stopping Mini Wolverine services..."
-	docker-compose down
+	docker compose down
 	@echo "✅ Services stopped!"
 
 # Restart services
@@ -53,19 +53,19 @@ restart: stop start
 # View logs
 logs:
 	@echo "📄 Viewing service logs (press Ctrl+C to exit)..."
-	docker-compose logs -f
+	docker compose logs -f
 
 # Clean up
 clean:
 	@echo "🧹 Cleaning up containers and volumes..."
-	docker-compose down -v --remove-orphans
+	docker compose down -v --remove-orphans
 	docker system prune -f
 	@echo "✅ Cleanup completed!"
 
 # Build containers
 build:
 	@echo "🔨 Building containers..."
-	docker-compose build --no-cache
+	docker compose build --no-cache
 	@echo "✅ Build completed!"
 
 # Health check
@@ -131,13 +131,13 @@ run-vue:
 	cd frontend-vue && npm run dev
 
 frontend-logs:
-	docker-compose logs -f web-server
+	docker compose logs -f web-server
 
 backend-logs:
-	docker-compose logs -f websocket-server
+	docker compose logs -f websocket-server
 
 dev-logs:
-	docker-compose logs -f dev-server
+	docker compose logs -f dev-server
 
 # Quick commands
 up: start

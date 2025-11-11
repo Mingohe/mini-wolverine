@@ -17,28 +17,119 @@ Mini Wolverine bridges the gap between complex financial infrastructure and prac
 - **🤖 AI-Ready Development**: Designed for AI coding agents and collaborative development
 - **📚 Comprehensive Documentation**: Rich documentation ecosystem for rapid development
 
-**Architecture**: Backend WASM + React Frontend + WebSocket Proxy + AI Coding Agent Ready
+**Architecture**: Backend WASM + Vue 3 Frontend + WebSocket Proxy + AI Coding Agent Ready
 
-## 🚀 Quick Start
+## 🚀 Quick Start Guide
 
-### Full-Stack Development
+### Method 1: Using Makefile (Recommended, Simplest)
 
 ```bash
-# Start backend (Node.js + WASM) and frontend (React) services
-docker-compose up -d
+# 1. Clone the repository
+git clone https://github.com/Mingohe/mini-wolverine.git
+cd mini-wolverine
 
-# Access services:
-# - Frontend UI: http://localhost:3000
+# 2. Switch to dev branch (Important!)
+git checkout dev
+
+# 3. Start development environment (auto-pull, build containers, start services)
+make dev
+
+# 4. Access services
+# - Vue Frontend: http://localhost:3002
 # - Backend API: http://localhost:4000/api/health
 ```
 
-### Environment Setup
+### Method 2: Using Docker Compose
 
 ```bash
-# Configure Caitlyn server connection
-cp .env.example .env
-vim .env  # Set CAITLYN_WS_URL and CAITLYN_TOKEN
+# 1. Clone the repository
+git clone https://github.com/Mingohe/mini-wolverine.git
+cd mini-wolverine
+
+# 2. Switch to dev branch (Important!)
+git checkout dev
+
+# 3. Start all services
+docker compose up -d
+
+# 4. Check service status
+docker compose ps
+
+# 5. View logs
+docker compose logs -f
 ```
+
+### Common Makefile Commands
+
+```bash
+# View all available commands
+make help
+
+# Start development environment (with hot reload)
+make dev
+
+# Stop all services
+make stop
+
+# Restart services
+make restart
+
+# Check service health status
+make health
+
+# Run connectivity tests
+make test
+
+# View logs
+make vue-logs      # Vue frontend logs
+make backend-logs  # Backend logs
+make logs          # All service logs
+
+# Git commands
+make git-pull      # Pull latest code
+make git-status    # View Git status
+make git-update    # Pull code and rebuild containers
+
+# Cleanup and rebuild
+make clean         # Clean containers and volumes
+make build         # Rebuild all containers
+make rebuild       # Clean + rebuild + start
+```
+
+### ⚠️ Important: Configure CAITLYN_TOKEN
+
+**CAITLYN_TOKEN is the authentication key for the backend to connect to the Wolverine service. It must be set for normal operation!**
+
+#### Method 1: Using Environment Variables (Recommended)
+
+```bash
+# Set your CAITLYN_TOKEN
+export CAITLYN_TOKEN=your_caitlyn_token_here
+
+# Start services
+make dev
+```
+
+#### Method 2: Modify docker-compose.yml
+
+Edit the `docker-compose.yml` file and replace the `CAITLYN_TOKEN` value with your actual token:
+
+```yaml
+environment:
+  - CAITLYN_TOKEN=your_caitlyn_token_here  # Replace with your actual token
+```
+
+#### Method 3: Using .env File (Recommended for Production)
+
+```bash
+# Create .env file
+echo "CAITLYN_TOKEN=your_caitlyn_token_here" > .env
+
+# docker-compose will automatically read .env file
+docker compose up -d
+```
+
+**Note**: The default token in `docker-compose.yml` is for demonstration only. Please replace it with your own token for actual use.
 
 
 ## 🏗️ Architecture Overview
@@ -46,11 +137,11 @@ vim .env  # Set CAITLYN_WS_URL and CAITLYN_TOKEN
 ### Backend-Frontend Separation
 
 ```
-React Frontend (Port 3000)        Node.js Backend (Port 4000)
-├── Pure React UI                 ├── Express REST API
+Vue 3 Frontend (Port 3002)        Node.js Backend (Port 4000)
+├── Vue 3 + TypeScript            ├── Express REST API
 ├── WebSocket to Backend          ├── WebSocket Server
-├── Context State Management      ├── WasmService (Caitlyn WASM)
-├── Styled Components             ├── CaitlynWebSocketService
+├── Pinia State Management       ├── WasmService (Caitlyn WASM)
+├── Vite Build Tool              ├── CaitlynWebSocketService
 └── No WASM dependencies          └── All caitlyn_js.wasm processing
           │                                   │
           └─────── WebSocket API ─────────────┘
@@ -61,9 +152,11 @@ React Frontend (Port 3000)        Node.js Backend (Port 4000)
 
 ### Tech Stack
 
-**Frontend (React)**:
-- React 18 with hooks and contexts
-- Styled-components for CSS-in-JS
+**Frontend (Vue 3)**:
+- Vue 3 with Composition API
+- TypeScript for type safety
+- Pinia for state management
+- Vite for fast development and building
 - WebSocket client for backend communication
 - Responsive design with modern UI/UX
 
@@ -83,20 +176,24 @@ React Frontend (Port 3000)        Node.js Backend (Port 4000)
 
 ```
 mini-wolverine/
-├── frontend-react/              # Pure React UI (No WASM)
+├── frontend-vue/               # Vue 3 Frontend (No WASM)
 │   ├── src/
-│   │   ├── components/          # React UI components
-│   │   │   ├── Header.js        # Application header
-│   │   │   ├── ConnectionControls.js  # Backend connection UI
-│   │   │   ├── StatusSection.js # System status display
-│   │   │   ├── TabSection.js    # Tabbed content (schema, data, historical)
-│   │   │   ├── ActionsSection.js # Action buttons
-│   │   │   └── Footer.js        # Application footer
-│   │   ├── contexts/            # React state management
-│   │   │   ├── BackendWebSocketContext.js  # Backend connection
-│   │   │   └── DataContext.js   # Data from backend
-│   │   └── App.js               # Main React component
-│   └── Dockerfile.dev           # Frontend container
+│   │   ├── components/         # Vue UI components
+│   │   │   ├── DSLQueryTab.vue # DSL unified query interface
+│   │   │   ├── WatchlistTab.vue # Watchlist
+│   │   │   ├── SchemaViewer.vue # Schema browser
+│   │   │   └── ...             # Other components
+│   │   ├── stores/             # Pinia state management
+│   │   │   ├── websocketStore.ts # WebSocket connection
+│   │   │   ├── dataStore.ts    # Data storage
+│   │   │   └── ...             # Other stores
+│   │   ├── services/           # API services
+│   │   ├── utils/              # Utility functions
+│   │   │   ├── dslParser.ts    # DSL parser
+│   │   │   ├── dslExecutor.ts  # DSL executor
+│   │   │   └── dslAutocomplete.ts # DSL autocomplete
+│   │   └── App.vue             # Main Vue component
+│   └── Dockerfile.dev          # Frontend container
 ├── backend/                     # Node.js + WASM Backend
 │   ├── src/
 │   │   ├── services/
@@ -119,6 +216,9 @@ mini-wolverine/
 ├── examples/
 │   └── test.js                  # Universe initialization demo
 ├── docker-compose.yml           # Multi-service orchestration
+├── Makefile                     # Development command shortcuts
+├── start-backend.sh            # Backend startup script
+├── start-frontend-vue.sh       # Frontend startup script
 └── CLAUDE.md                    # Detailed project guide
 ```
 
@@ -139,7 +239,7 @@ mini-wolverine/
 - **📈 Trading Integration**: Simplified versions of Wolverine's flagship trading and automation features
 
 ### 🚀 Production-Ready Architecture
-- **🏗️ Backend-Frontend Separation**: React UI + Node.js WASM processing
+- **🏗️ Backend-Frontend Separation**: Vue 3 UI + Node.js WASM processing
 - **💾 Memory Management**: Proper WASM object lifecycle and cleanup patterns
 - **🔄 Connection Pooling**: Efficient connection management with automatic reconnection
 - **📈 Historical Data**: ATFetchByCode and ATFetchByTime implementation
@@ -147,92 +247,212 @@ mini-wolverine/
 - **🐳 Docker Integration**: Complete containerized development environment
 
 ### 🎨 Visualization & User Experience
-- **📱 Responsive Design**: Modern React UI with styled-components
-- **📊 Rich Data Display**: Table views, charts, and real-time updates
+- **📱 Responsive Design**: Modern Vue 3 UI with TypeScript
+- **📝 DSL Query Interface**: Unified query language for all data operations
+- **🔤 Auto-completion**: Intelligent suggestions for DSL input
+- **📊 Rich Data Display**: Table views with pagination, charts, and real-time updates
 - **📤 Data Export**: JSON export functionality for further analysis
 - **🎛️ Interactive Controls**: Connection management and data exploration tools
 - **🔍 Schema Explorer**: Visual exploration of available data structures
 
 ## 🔧 Development Workflow
 
-### Full-Stack Development
+### Complete Development Environment
 
 ```bash
-# Start complete development environment
-docker-compose up -d
+# Start complete development environment (recommended)
+make dev
 
-# Services:
-# - Backend: Node.js + WASM processing (Port 4000)
-# - Frontend: React development server (Port 3000)
-# - Hot reload enabled for both services
+# Or use Docker Compose
+docker compose up -d
+
+# Service descriptions:
+# - Backend: Node.js + WASM processing (port 4000)
+# - Frontend: Vue 3 development server (port 3002)
+# - Hot reload: Both backend and frontend support auto-reload
 ```
 
 ### Backend Development
 
 ```bash
-
-node examples/test.js --url <ws_url> --token <token>  # Universe initialization
+# View backend logs
+make backend-logs
 
 # Backend features:
 # - All WASM operations (schema, universe, data fetching)
-# - WebSocket proxy to Caitlyn servers
+# - WebSocket proxy to Caitlyn server
 # - Memory management and cleanup
-# - Winston logging with configurable levels
+# - Winston logging (configurable levels)
+# - Hot reload: Files in backend/src/ auto-restart on change
 ```
 
 ### Frontend Development
 
 ```bash
-# Frontend connects to backend via WebSocket
-# - Pure React UI with no WASM dependencies
-# - Real-time updates from backend processing
-# - Context-based state management
-# - Responsive design with styled-components
+# View frontend logs
+make vue-logs
+
+# Frontend features:
+# - Vue 3 + TypeScript, no WASM dependencies
+# - Connect to backend via WebSocket
+# - Pinia state management
+# - Real-time updates from backend processed data
+# - Responsive design
+# - Hot reload: Files in frontend-vue/src/ auto-refresh on change
+```
+
+### Local Development (Without Docker)
+
+```bash
+# Start backend
+./start-backend.sh
+
+# Start frontend (new terminal)
+./start-frontend-vue.sh
 ```
 
 
-## 🎮 Getting Started
+## 🎮 Detailed Startup Steps (Beginner's Guide)
 
-### 1. Environment Setup
+### Prerequisites
+
+- **Docker Desktop** (Mac/Windows) or **Docker Engine** (Linux)
+- **Git** (for cloning code)
+- **Make** (built-in on Mac/Linux, needs installation on Windows)
+- **CAITLYN_TOKEN** (Wolverine service authentication key, must be configured)
+
+### ⚠️ Important: Get CAITLYN_TOKEN
+
+Before starting services, you need to:
+
+1. **Get your CAITLYN_TOKEN** (contact administrator or check Wolverine service documentation)
+2. **Set environment variable** or modify configuration file (see instructions below)
+
+### Step 1: Clone Code
 
 ```bash
-git clone <repository>
+# Clone repository
+git clone https://github.com/Mingohe/mini-wolverine.git
 cd mini-wolverine
 
-# Configure Caitlyn server connection
-cp .env.example .env
-# Edit .env with your Caitlyn server details:
-# CAITLYN_WS_URL=wss://116.wolverine-box.com/tm
-# CAITLYN_TOKEN=your-auth-token
+# ⚠️ Important: Switch to dev branch
+git checkout dev
 ```
 
-### 2. Start Services
+### Step 2: Configure CAITLYN_TOKEN
+
+**⚠️ Must be configured, otherwise backend cannot connect to Wolverine service!**
 
 ```bash
-# Start backend + frontend services
-docker-compose up -d
+# Method 1: Use environment variable (recommended)
+export CAITLYN_TOKEN=your_caitlyn_token_here
 
-# View logs
-docker-compose logs -f backend
-docker-compose logs -f react-app
+# Method 2: Create .env file
+echo "CAITLYN_TOKEN=your_caitlyn_token_here" > .env
+
+# Method 3: Directly modify CAITLYN_TOKEN value in docker-compose.yml
 ```
 
-### 3. Access Application
+### Step 3: Start Development Environment
 
-- **Frontend UI**: http://localhost:3000
-- **Backend API**: http://localhost:4000/api/health
-- **Schema API**: http://localhost:4000/api/schema
-- **Markets API**: http://localhost:4000/api/markets
-
-### 4. Test WASM Integration
+**Simplest way (recommended):**
 
 ```bash
-# Test universe initialization (requires valid token)
-node examples/test.js --url wss://116.wolverine-box.com/tm --token <your-token>
-
-# Test backend WASM capabilities
-node backend/test-backend-capabilities.js
+# One-command start (auto-build and start all services)
+make dev
 ```
+
+**Or use Docker Compose:**
+
+```bash
+# Start all services
+docker compose up -d
+
+# Check service status
+docker compose ps
+```
+
+### Step 4: Verify Services Running
+
+```bash
+# Method 1: Use Makefile health check
+make health
+
+# Method 2: Access via browser
+# Vue Frontend: http://localhost:3002
+# Backend API: http://localhost:4000/api/health
+```
+
+### Step 5: View Logs (Optional)
+
+```bash
+# View all service logs
+make logs
+
+# Or view separately
+make vue-logs      # Vue frontend logs
+make backend-logs   # Backend logs
+```
+
+### Service Access Addresses
+
+After successful startup, you can access via the following addresses:
+
+- **Vue Frontend Interface**: http://localhost:3002
+- **Backend Health Check**: http://localhost:4000/api/health
+- **Backend Schema API**: http://localhost:4000/api/schema
+- **Backend Markets API**: http://localhost:4000/api/markets
+- **WebSocket Connection**: ws://localhost:4000
+
+### Hot Reload Instructions
+
+**Backend Hot Reload**:
+- ✅ Configured with nodemon, files in `backend/src/` will auto-restart
+- After code changes, check `make backend-logs` to see auto-restart logs
+
+**Frontend Hot Reload**:
+- ✅ Configured with Vite HMR, files in `frontend-vue/src/` will auto-refresh
+- After code changes, browser will automatically refresh to show latest content
+
+### Update Code
+
+```bash
+# Pull latest code
+make git-pull
+
+# Pull code and rebuild containers (recommended)
+make git-update
+
+# Then restart services
+make restart
+```
+
+### Stop Services
+
+```bash
+# Stop all services
+make stop
+
+# Or use Docker Compose
+docker compose down
+```
+
+### Frequently Asked Questions
+
+**Q: `make: docker-compose: No such file or directory`**
+- A: Newer Docker versions use `docker compose` (without hyphen), already fixed. If still having issues, please update Docker Desktop.
+
+**Q: Port is already in use**
+- A: Check port usage: `lsof -i :4000` or `lsof -i :3002`, stop the process using the port.
+
+**Q: Container startup failed**
+- A: View logs: `make logs` or `docker compose logs`, check error messages.
+
+**Q: How to modify code?**
+- A: Directly modify local files, both backend and frontend support hot reload, changes take effect automatically.
+
+**Q: How to reset environment?**
+- A: Run `make clean` to clean all containers and volumes, then `make dev` to restart.
 
 ## 🤖 AI-Powered Development
 
@@ -310,50 +530,47 @@ class WasmService {
 }
 ```
 
-### Frontend React Features
+### Frontend Vue Features
 
-```jsx
-// frontend-react/src/components/NewFeature.js
-import React from 'react';
-import styled from 'styled-components';
-import { useBackendWebSocket } from '../contexts/BackendWebSocketContext';
-import { useData } from '../contexts/DataContext';
+```vue
+<!-- frontend-vue/src/components/NewFeature.vue -->
+<template>
+  <div class="container">
+    <h3>New Feature</h3>
+    <button @click="handleNewRequest" :disabled="!isConnected">
+      Request New Data
+    </button>
+  </div>
+</template>
 
-const Container = styled.div`
+<script setup lang="ts">
+import { computed } from 'vue'
+import { useWebSocketStore } from '@/stores/websocketStore'
+import { useDataStore } from '@/stores/dataStore'
+
+const wsStore = useWebSocketStore()
+const dataStore = useDataStore()
+
+const isConnected = computed(() => wsStore.isConnected)
+
+const handleNewRequest = () => {
+  if (wsStore.isConnected) {
+    // Send request to backend using DSL
+    wsStore.sendMessage({
+      type: 'dsl_query',
+      dsl: 'fc:global::SampleQuote@0[DCE:i2501] | 1m | 2025-01-01..2025-01-31'
+    })
+  }
+}
+</script>
+
+<style scoped>
+.container {
   padding: 20px;
   background: var(--card-background);
   border-radius: var(--border-radius);
-`;
-
-function NewFeature() {
-  const { isConnected, actions: wsActions } = useBackendWebSocket();
-  const { data, actions: dataActions } = useData();
-  
-  const handleNewRequest = () => {
-    if (isConnected) {
-      // Send request to backend
-      wsActions.sendMessage(JSON.stringify({
-        type: 'new_data_request',
-        params: {
-          market: 'DCE',
-          symbol: 'i2501',
-          timeframe: '1m'
-        }
-      }));
-    }
-  };
-  
-  return (
-    <Container>
-      <h3>New Feature</h3>
-      <button onClick={handleNewRequest} disabled={!isConnected}>
-        Request New Data
-      </button>
-    </Container>
-  );
 }
-
-export default NewFeature;
+</style>
 ```
 
 ## 🔌 Integration Architecture
@@ -418,33 +635,47 @@ processStructValue(sv) {
 
 ### Historical Data System
 
-```javascript
+```typescript
 // Complete flow: Frontend → Backend → Caitlyn → WASM → Response
 
-// 1. Frontend requests data
-const { actions } = useData();
-actions.requestHistoricalData({
-  market: 'SHFE',
-  symbol: 'au2502',
-  timeframe: '1h',
-  lookback: 30  // days
-});
+// 1. Frontend requests data using DSL
+import { dslExecutor } from '@/utils/dslExecutor'
+
+const result = await dslExecutor.execute(
+  'fc:global::SampleQuote@0[SHFE:au2502] | 1h | 2025-01-01..2025-01-31',
+  {
+    onSuccess: (data) => {
+      // Data received and processed
+      console.log('Records:', data.records)
+    },
+    onError: (error) => {
+      console.error('Query failed:', error)
+    }
+  }
+)
 
 // 2. Backend processes with WASM
-// - Creates ATFetchByCode request
-// - Sends to Caitlyn server
+// - DSL Parser parses query string
+// - DSL Executor creates ATFetchByCode request
+// - Sends to Caitlyn server via WebSocket
 // - Receives binary response
 // - Decodes with WASM compressor
 // - Extracts StructValue data
-// - Sends JSON to frontend
+// - Converts to JSON format
+// - Sends response to frontend
 
 // 3. Frontend receives processed data
-useEffect(() => {
-  // Data automatically updated via DataContext
-  if (historicalData.size > 0) {
+import { watch } from 'vue'
+import { useDataStore } from '@/stores/dataStore'
+
+const dataStore = useDataStore()
+
+watch(() => dataStore.queryResult, (result) => {
+  if (result && result.records.length > 0) {
     // Display charts, tables, export options
+    console.log('Data updated:', result.records)
   }
-}, [historicalData]);
+})
 ```
 
 ## 🏗️ Backend WASM Architecture
@@ -509,16 +740,16 @@ CMD_AT_SUBSCRIBE → Live market data streaming
 ```javascript
 // Supported Markets (discovered via universe initialization)
 const globalMarkets = [
-  'CFFEX',  // 中金所 - China Financial Futures Exchange
-  'CZCE',   // 郑商所 - Zhengzhou Commodity Exchange  
-  'DCE',    // 大商所 - Dalian Commodity Exchange
+  'CFFEX',  // China Financial Futures Exchange
+  'CZCE',   // Zhengzhou Commodity Exchange  
+  'DCE',    // Dalian Commodity Exchange
   'DME',    // Dubai Mercantile Exchange
-  'HUOBI',  // 火币网 - Huobi Exchange
+  'HUOBI',  // Huobi Exchange
   'ICE',    // Intercontinental Exchange
-  'INE',    // 上海国际能源交易中心 - Shanghai International Energy Exchange
+  'INE',    // Shanghai International Energy Exchange
   'NYMEX',  // New York Mercantile Exchange
-  'SGX',    // 新交所 - Singapore Exchange
-  'SHFE'    // 上期所 - Shanghai Futures Exchange
+  'SGX',    // Singapore Exchange
+  'SHFE'    // Shanghai Futures Exchange
 ];
 
 // Each market supports multiple qualified names:
@@ -544,19 +775,45 @@ function FinancialChart({ historicalData }) {
 
 ## 🚢 Deployment & Configuration
 
-### Development Deployment
+### Development Environment Deployment
+
+**Using Makefile (Recommended):**
 
 ```bash
-# Start full-stack development
-docker-compose up -d
+# Start development environment
+make dev
 
-# Monitor services
-docker-compose logs -f backend    # WASM + WebSocket processing
-docker-compose logs -f react-app  # React UI development
+# Check service status
+make health
 
-# Health checks
+# View logs
+make vue-logs      # Vue frontend
+make backend-logs   # Backend service
+```
+
+**Using Docker Compose:**
+
+```bash
+# Start all services
+docker compose up -d
+
+# View logs
+docker compose logs -f backend    # Backend service
+docker compose logs -f vue-app    # Vue frontend
+
+# Health check
 curl http://localhost:4000/api/health  # Backend API
-open http://localhost:3000            # Frontend UI
+open http://localhost:3002            # Vue frontend
+```
+
+### Production Environment Deployment
+
+```bash
+# Build production images
+docker compose -f docker-compose.prod.yml build
+
+# Start production services
+docker compose -f docker-compose.prod.yml up -d
 ```
 
 ### Environment Configuration
@@ -567,18 +824,24 @@ open http://localhost:3000            # Frontend UI
 # Backend Configuration
 PORT=4000
 LOG_LEVEL=info
-CAPITAL_WS_URL=wss://116.wolverine-box.com/tm
-CAPITAL_TOKEN=your-caitlyn-auth-token
-CAPITAL_CONNECTION_TIMEOUT=30000
-CAPITAL_RECONNECT_DELAY=5000
-CAPITAL_MAX_RECONNECT_ATTEMPTS=3
+CAITLYN_WS_URL=wss://116.wolverine-box.com/tm
+
+# ⚠️ Important: Must set your CAITLYN_TOKEN to connect to backend service
+# Please contact administrator to get your authentication token
+CAITLYN_TOKEN=your-caitlyn-auth-token
+
+CAITLYN_CONNECTION_TIMEOUT=30000
+CAITLYN_RECONNECT_DELAY=5000
+CAITLYN_MAX_RECONNECT_ATTEMPTS=3
 
 # Frontend Configuration  
-REACT_APP_BACKEND_WS_URL=ws://localhost:4000
+VITE_API_BASE_URL=http://localhost:4000
+VITE_WS_BASE_URL=ws://localhost:4000
 CHOKIDAR_USEPOLLING=true  # For Docker file watching
 
 # Production overrides
-# REACT_APP_BACKEND_WS_URL=wss://your-domain.com/api/ws
+# VITE_API_BASE_URL=https://your-domain.com
+# VITE_WS_BASE_URL=wss://your-domain.com
 # LOG_LEVEL=warn
 ```
 
@@ -592,15 +855,16 @@ CHOKIDAR_USEPOLLING=true  # For Docker file watching
 
 ## 🔧 Configuration
 
-### Docker Compose Profiles
+### Docker Compose Configuration
 
-- **development**: React dev server with hot reload
+- **development**: Vue 3 dev server with hot reload
 - **production**: Optimized build with Nginx
 
 ### Environment Variables
 
-#### React App
-- `REACT_APP_WS_URL`: WebSocket server URL
+#### Vue App
+- `VITE_API_BASE_URL`: Backend API base URL
+- `VITE_WS_BASE_URL`: WebSocket server URL
 - `NODE_ENV`: Environment (development/production)
 - `CHOKIDAR_USEPOLLING`: Enable file watching in Docker
 
@@ -633,22 +897,58 @@ CHOKIDAR_USEPOLLING=true  # For Docker file watching
 
 ## 🤝 Contributing
 
-1. **Development Setup**
-   ```bash
-   docker-compose --profile development up
-   ```
+### Development Environment Setup
 
-2. **Code Standards**
-   - Use React hooks and functional components
-   - Style with styled-components
-   - Follow responsive design patterns
-   - Add proper error handling
+```bash
+# 1. Clone repository
+git clone https://github.com/Mingohe/mini-wolverine.git
+cd mini-wolverine
 
-3. **Testing**
-   ```bash
-   cd frontend-react
-   npm test
-   ```
+# 2. Switch to dev branch (Important!)
+git checkout dev
+
+# 3. Start development environment
+make dev
+
+# 4. Start developing
+# After code changes, backend and frontend will auto-reload
+```
+
+### Code Standards
+
+- **Vue 3**: Use Composition API and `<script setup>`
+- **TypeScript**: All new code uses TypeScript
+- **State Management**: Use Pinia stores
+- **Styling**: Use Scoped CSS or Tailwind CSS
+- **Error Handling**: Add appropriate error handling and user prompts
+- **Code Formatting**: Follow ESLint and Prettier configuration
+
+### Submitting Code
+
+```bash
+# 1. Pull latest code
+make git-pull
+
+# 2. Create new branch
+git checkout -b feature/your-feature-name
+
+# 3. Commit changes
+git add .
+git commit -m "feat: add your feature description"
+
+# 4. Push to remote
+git push origin feature/your-feature-name
+```
+
+### Testing
+
+```bash
+# Run connectivity tests
+make test
+
+# Check service health status
+make health
+```
 
 ## 📄 License
 
@@ -667,7 +967,9 @@ This project is designed as a demonstration and reference implementation. See in
 - ✅ **Testing Suite**: Complete validation framework for reliable development
 
 **User Experience (Complete)**:
-- ✅ **Responsive UI**: Modern React interface with real-time updates
+- ✅ **Responsive UI**: Modern Vue 3 interface with real-time updates
+- ✅ **DSL Query System**: Unified query language for indicators and formulas
+- ✅ **Auto-completion**: Intelligent DSL input suggestions
 - ✅ **WebSocket Communication**: Seamless backend-frontend data flow  
 - ✅ **Data Visualization**: Interactive tables, charts, and export functionality
 - ✅ **Docker Development**: Hot reload environment for rapid iteration
@@ -744,4 +1046,4 @@ All trading features will maintain Mini Wolverine's core principles:
 
 ---
 
-**Mini Wolverine** - A modern, scalable foundation for financial data applications. Built with React, WebAssembly, and Docker for professional development workflows.
+**Mini Wolverine** - A modern, scalable foundation for financial data applications. Built with Vue 3, TypeScript, WebAssembly, and Docker for professional development workflows.
