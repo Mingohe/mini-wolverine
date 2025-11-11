@@ -4,8 +4,7 @@ import type { WebSocketMessage } from '@/types'
 export interface SubscriptionConfig {
   markets: string[]
   codes: string[]
-  qualifiedNames: string[]
-  namespace: string
+  qualifiedNames: string[]  // Already contains namespace prefix (e.g., 'global::SampleQuote', 'Formula::Data')
   options?: {
     formulaCode?: string
     granularity?: number
@@ -217,12 +216,14 @@ class SubscriptionService {
 
   // Generate subscription key for deduplication
   private generateSubscriptionKey(config: SubscriptionConfig): string {
-    const markets = Array.isArray(config.markets) ? config.markets.sort().join(',') : config.markets
-    const codes = Array.isArray(config.codes) ? config.codes.sort().join(',') : config.codes
-    const qualifiedNames = Array.isArray(config.qualifiedNames) ? config.qualifiedNames.sort().join(',') : config.qualifiedNames
+    // IMPORTANT: Create copies before sorting to avoid mutating original arrays
+    const markets = Array.isArray(config.markets) ? [...config.markets].sort().join(',') : config.markets
+    const codes = Array.isArray(config.codes) ? [...config.codes].sort().join(',') : config.codes
+    const qualifiedNames = Array.isArray(config.qualifiedNames) ? [...config.qualifiedNames].sort().join(',') : config.qualifiedNames
     const options = config.options ? JSON.stringify(config.options) : ''
-    
-    return `${config.namespace}::${markets}::${codes}::${qualifiedNames}::${options}`
+
+    // qualifiedNames already contains namespace prefix (e.g., 'global::SampleQuote')
+    return `${markets}::${codes}::${qualifiedNames}::${options}`
   }
 
   // Subscribe to real-time data with callback for real-time updates
@@ -450,7 +451,7 @@ class SubscriptionService {
 
     const subscription = this.subscriptions.value.get(subscriberId)
     if (!subscription) {
-      console.warn(`⚠️ Subscription not found for real-time data:`, subscriberId)
+      // Silently ignore - this might be a formula subscription or other service's subscription
       return
     }
 
@@ -593,7 +594,7 @@ class SubscriptionService {
           markets: sub.config.markets,
           codes: sub.config.codes,
           qualifiedNames: sub.config.qualifiedNames,
-          namespace: sub.config.namespace
+          options: sub.config.options
         }
       }))
     }

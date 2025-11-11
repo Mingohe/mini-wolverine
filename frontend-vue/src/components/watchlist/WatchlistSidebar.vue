@@ -148,6 +148,8 @@ const formatUpdateTime = (date: Date): string => {
 <style scoped>
 .watchlist-sidebar {
   width: 280px;
+  min-width: 280px;
+  flex-shrink: 0;
   background: #f8f9fa;
   border-right: 1px solid #e0e0e0;
   display: flex;

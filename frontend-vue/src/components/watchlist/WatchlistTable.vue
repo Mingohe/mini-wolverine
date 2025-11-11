@@ -11,6 +11,10 @@
         </div>
       </div>
       <div class="table-actions">
+        <ColumnSelector
+          :current-config="watchlistStore.columnConfig"
+          @update:config="handleColumnConfigUpdate"
+        />
         <button
           class="action-btn refresh-btn"
           @click="$emit('refresh')"
@@ -41,20 +45,14 @@
               <th @click="handleSort('name')" class="sortable">
                 Name <span class="sort-indicator" :class="getSortClass('name')">⇅</span>
               </th>
-              <th @click="handleSort('open')" class="sortable number">
-                Open <span class="sort-indicator" :class="getSortClass('open')">⇅</span>
-              </th>
-              <th @click="handleSort('high')" class="sortable number">
-                High <span class="sort-indicator" :class="getSortClass('high')">⇅</span>
-              </th>
-              <th @click="handleSort('low')" class="sortable number">
-                Low <span class="sort-indicator" :class="getSortClass('low')">⇅</span>
-              </th>
-              <th @click="handleSort('close')" class="sortable number">
-                Close <span class="sort-indicator" :class="getSortClass('close')">⇅</span>
-              </th>
-              <th @click="handleSort('volume')" class="sortable number">
-                Volume <span class="sort-indicator" :class="getSortClass('volume')">⇅</span>
+              <!-- 动态字段列 -->
+              <th
+                v-for="field in displayFields"
+                :key="field"
+                @click="handleSort(field)"
+                class="sortable number"
+              >
+                {{ availableFields[field]?.label || field }} <span class="sort-indicator" :class="getSortClass(field)">⇅</span>
               </th>
               <th class="actions">Actions</th>
             </tr>
@@ -73,25 +71,15 @@
                   ⏳
                 </span>
               </td>
-              <td class="number price">
+              <!-- 动态字段数据 -->
+              <td
+                v-for="field in displayFields"
+                :key="field"
+                class="number price"
+                :class="field === 'close' ? hasBlinkEffect(item, 'close') : ''"
+              >
                 <span v-if="watchlistStore.isItemLoading(item.market, item.code)" class="loading-data">Loading...</span>
-                <span v-else :class="hasBlinkEffect(item, 'open')">{{ formatPrice(getQuoteField(item, 'open')) }}</span>
-              </td>
-              <td class="number price high">
-                <span v-if="watchlistStore.isItemLoading(item.market, item.code)" class="loading-data">Loading...</span>
-                <span v-else :class="hasBlinkEffect(item, 'high')">{{ formatPrice(getQuoteField(item, 'high')) }}</span>
-              </td>
-              <td class="number price low">
-                <span v-if="watchlistStore.isItemLoading(item.market, item.code)" class="loading-data">Loading...</span>
-                <span v-else :class="hasBlinkEffect(item, 'low')">{{ formatPrice(getQuoteField(item, 'low')) }}</span>
-              </td>
-              <td class="number price close">
-                <span v-if="watchlistStore.isItemLoading(item.market, item.code)" class="loading-data">Loading...</span>
-                <span v-else :class="hasBlinkEffect(item, 'close')">{{ formatPrice(getQuoteField(item, 'close')) }}</span>
-              </td>
-              <td class="number volume">
-                <span v-if="watchlistStore.isItemLoading(item.market, item.code)" class="loading-data">Loading...</span>
-                <span v-else>{{ formatVolume(getQuoteField(item, 'volume')) }}</span>
+                <span v-else>{{ (availableFields[field]?.formatter || formatPrice)(getQuoteField(item, field as keyof MarketQuote['fields'])) }}</span>
               </td>
               <td class="actions">
                 <button
@@ -144,6 +132,7 @@
 import { computed, ref, watch, nextTick } from 'vue'
 import type { WatchlistItem, WatchlistGroup, MarketQuote, SortConfig } from '@/types/watchlist'
 import { useWatchlistStore } from '@/stores/watchlistStore'
+import ColumnSelector from './ColumnSelector.vue'
 
 // 获取watchlist store实例
 const watchlistStore = useWatchlistStore()
@@ -155,6 +144,7 @@ interface Props {
   selectedGroup: WatchlistGroup | null
   marketData: Map<string, MarketQuote>
   sortConfig: SortConfig
+  subscribedFields?: string[]  // 订阅的字段列表
 }
 
 // 价格变化追踪
@@ -180,6 +170,94 @@ const emit = defineEmits<{
   'remove-item': [item: WatchlistItem]
   'toggle-spotlight': []
 }>()
+
+// 格式化函数（需要先声明）
+const formatPrice = (value: number | null): string => {
+  if (value === null || value === undefined) return '-'
+  return value.toLocaleString('zh-CN', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 4
+  })
+}
+
+const formatChange = (value: number | null): string => {
+  if (value === null || value === undefined) return '-'
+  const sign = value > 0 ? '+' : ''
+  return sign + value.toLocaleString('zh-CN', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 4
+  })
+}
+
+const formatChangeRate = (value: number | null): string => {
+  if (value === null || value === undefined) return '-'
+  const sign = value > 0 ? '+' : ''
+  return sign + value.toFixed(2) + '%'
+}
+
+const formatVolume = (value: number | null): string => {
+  if (value === null || value === undefined) return '-'
+  if (value >= 10000) {
+    return (value / 10000).toFixed(1) + '万'
+  }
+  return value.toLocaleString('zh-CN')
+}
+
+const formatAmount = (value: number | null): string => {
+  if (value === null || value === undefined) return '-'
+  if (value >= 100000000) {
+    return (value / 100000000).toFixed(2) + '亿'
+  }
+  if (value >= 10000) {
+    return (value / 10000).toFixed(1) + '万'
+  }
+  return value.toLocaleString('zh-CN')
+}
+
+// 预定义的特殊字段格式化函数映射
+const specialFormatters: Record<string, (value: number | null) => string> = {
+  volume: formatVolume,
+  turnover: formatAmount,
+  change: formatChange,
+  changeRate: formatChangeRate,
+  change_percentage: formatChangeRate
+}
+
+// 动态构建可用字段定义（基于订阅的字段列表）
+const availableFields = computed(() => {
+  const fields: Record<string, { label: string; sortable: boolean; formatter: (value: number | null) => string }> = {}
+
+  if (!props.subscribedFields || props.subscribedFields.length === 0) {
+    return fields
+  }
+
+  props.subscribedFields.forEach(fieldName => {
+    // 生成友好的标签名称（首字母大写，下划线转空格）
+    const label = fieldName
+      .split('_')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ')
+
+    // 根据字段名选择合适的格式化函数
+    const formatter = specialFormatters[fieldName] || formatPrice
+
+    fields[fieldName] = {
+      label,
+      sortable: true,
+      formatter
+    }
+  })
+
+  return fields
+})
+
+// 动态显示的字段列（直接使用订阅的字段列表）
+const displayFields = computed(() => {
+  if (!props.subscribedFields || props.subscribedFields.length === 0) {
+    return []
+  }
+  return props.subscribedFields
+})
 
 // 计算属性
 const lastUpdateTime = computed(() => {
@@ -234,6 +312,10 @@ const sortedItems = computed(() => {
 })
 
 // 方法
+const handleColumnConfigUpdate = async (config: { metas: string[]; fields: Record<string, string[]> }) => {
+  await watchlistStore.saveColumnConfig(config)
+}
+
 const handleSort = (field: string) => {
   const currentDirection = props.sortConfig.field === field ? props.sortConfig.direction : 'asc'
   const newDirection = currentDirection === 'asc' ? 'desc' : 'asc'
@@ -290,12 +372,6 @@ const getQuoteField = (item: WatchlistItem, field: keyof MarketQuote['fields']):
 const getSortClass = (field: string): string => {
   if (props.sortConfig.field !== field) return ''
   return props.sortConfig.direction === 'asc' ? 'asc' : 'desc'
-}
-
-const getChangeClass = (item: WatchlistItem): string => {
-  const change = getQuoteField(item, 'change')
-  if (change === null || change === 0) return ''
-  return change > 0 ? 'positive' : 'negative'
 }
 
 // 检查指定字段是否有闪烁效果
@@ -391,47 +467,11 @@ watch(() => props.marketData, () => {
 // 定期清理过期的闪烁效果
 setInterval(cleanupExpiredBlinks, 500)
 
-// 格式化函数
-const formatPrice = (value: number | null): string => {
-  if (value === null || value === undefined) return '-'
-  return value.toLocaleString('zh-CN', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 4
-  })
-}
-
-const formatChange = (value: number | null): string => {
-  if (value === null || value === undefined) return '-'
-  const sign = value > 0 ? '+' : ''
-  return sign + value.toLocaleString('zh-CN', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 4
-  })
-}
-
+// 其他格式化函数
 const formatPercent = (value: number | null): string => {
   if (value === null || value === undefined) return '-'
   const sign = value > 0 ? '+' : ''
   return sign + (value * 100).toFixed(2) + '%'
-}
-
-const formatVolume = (value: number | null): string => {
-  if (value === null || value === undefined) return '-'
-  if (value >= 10000) {
-    return (value / 10000).toFixed(1) + '万'
-  }
-  return value.toLocaleString('zh-CN')
-}
-
-const formatAmount = (value: number | null): string => {
-  if (value === null || value === undefined) return '-'
-  if (value >= 100000000) {
-    return (value / 100000000).toFixed(2) + '亿'
-  }
-  if (value >= 10000) {
-    return (value / 10000).toFixed(1) + '万'
-  }
-  return value.toLocaleString('zh-CN')
 }
 
 const formatTime = (date: Date | null, type: string = 'display'): string => {
@@ -448,6 +488,7 @@ const formatTime = (date: Date | null, type: string = 'display'): string => {
 <style scoped>
 .watchlist-table-container {
   flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   background: white;

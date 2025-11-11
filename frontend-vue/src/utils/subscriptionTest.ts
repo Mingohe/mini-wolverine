@@ -22,8 +22,7 @@ export class SubscriptionTest {
       const testConfig = {
         markets: ['SHFE'],
         codes: ['rb2501'],
-        qualifiedNames: ['SampleQuote'],
-        namespace: 'global',
+        qualifiedNames: ['global::SampleQuote'],  // Namespace prefix included in qualifiedNames
         options: {
           granularity: 86400
         }

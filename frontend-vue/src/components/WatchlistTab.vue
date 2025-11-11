@@ -31,6 +31,7 @@
         :selected-group="watchlistStore.selectedGroup"
         :market-data="watchlistStore.marketData"
         :sort-config="watchlistStore.sortConfig"
+        :subscribed-fields="watchlistStore.subscribedFields"
         @refresh="handleRefresh"
         @sort="handleSort"
         @remove-item="handleRemoveItem"

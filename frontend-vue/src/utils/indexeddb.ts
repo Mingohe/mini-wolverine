@@ -5,9 +5,10 @@
 import type { WatchlistGroup, WatchlistItem } from '@/types/watchlist'
 
 const DB_NAME = 'WatchlistDB'
-const DB_VERSION = 1
+const DB_VERSION = 2
 const GROUPS_STORE = 'watchlistGroups'
 const ITEMS_STORE = 'watchlistItems'
+const CONFIG_STORE = 'columnConfigs'
 
 class WatchlistDB {
   private db: IDBDatabase | null = null
@@ -41,6 +42,11 @@ class WatchlistDB {
           itemStore.createIndex('groupId', 'groupId', { unique: false })
           itemStore.createIndex('market', 'market', { unique: false })
           itemStore.createIndex('addedAt', 'addedAt', { unique: false })
+        }
+
+        // 创建列配置存储
+        if (!db.objectStoreNames.contains(CONFIG_STORE)) {
+          db.createObjectStore(CONFIG_STORE, { keyPath: 'id' })
         }
       }
     })
@@ -190,13 +196,67 @@ class WatchlistDB {
     })
   }
 
+  // 保存列配置
+  async saveColumnConfig(config: { metas: string[]; fields: Record<string, string[]> }): Promise<void> {
+    if (!this.db) throw new Error('Database not initialized')
+
+    return new Promise((resolve, reject) => {
+      const transaction = this.db!.transaction([CONFIG_STORE], 'readwrite')
+      const store = transaction.objectStore(CONFIG_STORE)
+
+      const configWithId = {
+        id: 'default_column_config',
+        metas: config.metas,
+        fields: config.fields,
+        updatedAt: new Date().toISOString()
+      }
+
+      const request = store.put(configWithId)
+
+      request.onsuccess = () => {
+        resolve()
+      }
+
+      request.onerror = () => {
+        reject(new Error('Failed to save column config'))
+      }
+    })
+  }
+
+  // 获取列配置
+  async getColumnConfig(): Promise<{ metas: string[]; fields: Record<string, string[]> } | null> {
+    if (!this.db) throw new Error('Database not initialized')
+
+    return new Promise((resolve, reject) => {
+      const transaction = this.db!.transaction([CONFIG_STORE], 'readonly')
+      const store = transaction.objectStore(CONFIG_STORE)
+      const request = store.get('default_column_config')
+
+      request.onsuccess = () => {
+        if (request.result) {
+          resolve({
+            metas: request.result.metas,
+            fields: request.result.fields
+          })
+        } else {
+          resolve(null)
+        }
+      }
+
+      request.onerror = () => {
+        reject(new Error('Failed to get column config'))
+      }
+    })
+  }
+
   // 清空数据库
   async clearAll(): Promise<void> {
     if (!this.db) throw new Error('Database not initialized')
 
     return Promise.all([
       this.clearStore(GROUPS_STORE),
-      this.clearStore(ITEMS_STORE)
+      this.clearStore(ITEMS_STORE),
+      this.clearStore(CONFIG_STORE)
     ]).then(() => {})
   }
 

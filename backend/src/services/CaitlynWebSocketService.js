@@ -585,7 +585,7 @@ class ClientHandler {
    * @param {Object} options - Subscription options
    * @returns {Promise<string>} subscriber ID
    */
-  async subscribeHub(markets, codes, qualifiedNames, namespace = 'global', callback, options = {}) {
+  async subscribeHub(markets, codes, qualifiedNames, callback, options = {}) {
     if (!this.isConnected) {
       throw new Error('Not connected to Caitlyn server');
     }
@@ -598,7 +598,7 @@ class ClientHandler {
     const { connection, connectionId } = await this.caitlynService.connectionPool.getConnection();
 
     try {
-      const subscriberId = connection.subscribeHub(markets, codes, qualifiedNames, namespace, callback, options);
+      const subscriberId = connection.subscribeHub(markets, codes, qualifiedNames, callback, options);
 
       // 记录此客户端的订阅
       this.activeSubscriptions.add(subscriberId);

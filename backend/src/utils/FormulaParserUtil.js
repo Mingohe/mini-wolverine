@@ -675,7 +675,7 @@ class FormulaParserUtil {
             }
           }
           // 根据图表类型处理
-          if (c.type.value === 0) { // POLYLINE
+          if (c.type === wasmModule.FormulaChartType.POLYLINE) { // POLYLINE
             fields.push({
               name: name,
               precision: 5,
@@ -724,7 +724,7 @@ class FormulaParserUtil {
                 name: name,
               };
             }
-          } else if (c.type.value === 1) { // BAR
+          } else if (c.type === wasmModule.FormulaChartType.BAR) { // BAR
             if (c.functionName === "stickline") {
               // 处理 stickline 的多个字段
               const fieldNames = ["_cond", "_price1", "_price2", "_width", "_attr"];
@@ -745,7 +745,6 @@ class FormulaParserUtil {
                 }
                 values.push(vs);
               }
-              
               displayConfiguration[name] = {
                 line_style: "bar",
                 display: {
@@ -760,7 +759,7 @@ class FormulaParserUtil {
                 name: name,
               };
             }
-          } else if (c.type.value === 2) { // FUTURELINE
+          } else if (c.type === wasmModule.FormulaChartType.FUTURELINE) { // FUTURELINE
             fields.push({
               name: name,
               precision: 5,

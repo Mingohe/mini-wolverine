@@ -101,6 +101,7 @@ export class SVObject {
             }
         }
         if(bestMeta === null) {
+            debugger;
             throw new Error(`No matching metadata found for ${this.namespace}::${this.metaName} with revision <= ${this.revision}`);
         }
         this.loadDef(bestMeta);

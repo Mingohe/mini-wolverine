@@ -402,15 +402,14 @@ Alternative historical data request format.
 #### Real-time Subscriptions
 
 ##### `subscribe`
-Subscribe to real-time data updates with automatic deduplication.
+Subscribe to real-time data updates with automatic deduplication and broadcast to multiple subscribers.
 
 ```json
 {
   "type": "subscribe",
   "markets": ["ICE", "DCE"],
   "codes": ["B<00>", "i<00>"],
-  "qualifiedNames": ["SampleQuote"],
-  "namespace": "global",
+  "qualifiedNames": ["global::SampleQuote"],
   "options": {
     "granularities": [86400],
     "fields": ["bid", "ask", "last", "volume"]
@@ -420,17 +419,22 @@ Subscribe to real-time data updates with automatic deduplication.
 ```
 
 **Parameters:**
-- `markets` (string|array): Market code(s)
-- `codes` (string|array): Security code(s)
-- `qualifiedNames` (string|array): Metadata type(s)
-- `namespace` (string): "global" or "private"
+- `markets` (string|array): Market code(s) - can be single string or array
+- `codes` (string|array): Security code(s) - can be single string or array
+- `qualifiedNames` (string|array): Fully qualified metadata type(s) including namespace (e.g., "global::SampleQuote", "private::Market")
 - `options` (object): Subscription options
-  - `granularities` (array): Time granularities in seconds
+  - `granularities` (array): Time granularities in seconds (must match codes array length)
   - `fields` (array): Requested field names
-- `requestId` (string, optional): Request identifier
+- `requestId` (string, optional): Request identifier for correlation
+
+**Implementation Notes:**
+- Uses subscription hub for automatic deduplication and broadcast
+- Supports multiple subscribers to the same market/code combination
+- Real-time data is broadcast to all matching subscribers
+- Backend validates connection status before accepting subscription
 
 ##### `unsubscribe`
-Cancel a real-time subscription.
+Cancel a real-time subscription using the subscriber ID.
 
 ```json
 {
@@ -441,8 +445,13 @@ Cancel a real-time subscription.
 ```
 
 **Parameters:**
-- `subscriberId` (string): ID returned from subscribe request
-- `requestId` (string, optional): Request identifier
+- `subscriberId` (string): Unique subscriber ID returned from subscribe request
+- `requestId` (string, optional): Request identifier for correlation
+
+**Implementation Notes:**
+- Removes subscriber from subscription hub
+- If no more subscribers exist for a subscription key, the subscription is fully cancelled
+- Returns success/error response confirming unsubscription status
 
 ##### `get_subscription_stats`
 Get subscription statistics and monitoring information.
@@ -456,6 +465,65 @@ Get subscription statistics and monitoring information.
 
 **Parameters:**
 - `requestId` (string, optional): Request identifier
+
+#### Formula Operations
+
+##### `register_formula`
+Register a formula on the server for later calculation and real-time subscription.
+
+```json
+{
+  "type": "register_formula",
+  "formulaId": -222,
+  "sourceCode": "variable: SHORT=12;\nvariable: LONG=26;\nDIFF: EMA(CLOSE,SHORT) - EMA(CLOSE,LONG);",
+  "languageId": 5,
+  "requestId": "reg_123456"
+}
+```
+
+**Parameters:**
+- `formulaId` (number): Unique formula identifier (usually negative for user formulas)
+- `sourceCode` (string): Formula source code in the specified language
+- `languageId` (number): Language identifier (default: 5)
+- `requestId` (string, optional): Request identifier for correlation
+
+**Implementation Notes:**
+- Requires active connection pool to Caitlyn server
+- Returns UUID that can be used for formula calculation
+- Formula remains registered for the session duration
+
+##### `calculate_formula`
+Calculate a registered formula for historical data with optional real-time subscription.
+
+```json
+{
+  "type": "calculate_formula",
+  "uuid": "formula-uuid-from-registration",
+  "market": "NYMEX",
+  "code": "CL<00>",
+  "fromTime": 1672531200000,
+  "toTime": 1672617600000,
+  "granularity": 86400,
+  "isRealTime": true,
+  "requestId": "calc_123456"
+}
+```
+
+**Parameters:**
+- `uuid` (string): Formula UUID returned from registration
+- `market` (string): Market code
+- `code` (string): Security code
+- `fromTime` (number): Start time (Unix timestamp in milliseconds)
+- `toTime` (number): End time (Unix timestamp in milliseconds)
+- `granularity` (number): Time granularity in seconds
+- `isRealTime` (boolean): Whether to enable real-time updates (default: false)
+- `requestId` (string, optional): Request identifier for correlation
+
+**Implementation Notes:**
+- Formula must be registered first using `register_formula`
+- Returns historical calculation results with display configuration
+- If `isRealTime` is true, establishes real-time subscription for formula updates
+- Real-time data includes formula calculation results with the same structure
 
 ### Backend → Frontend Messages
 
@@ -650,8 +718,7 @@ Response to successful subscription requests.
   "subscriptionInfo": {
     "markets": ["ICE", "DCE"],
     "codes": ["B<00>", "i<00>"],
-    "qualifiedNames": ["SampleQuote"],
-    "namespace": "global",
+    "qualifiedNames": ["global::SampleQuote"],
     "options": {
       "granularities": [86400],
       "fields": ["bid", "ask", "last", "volume"]
@@ -741,8 +808,7 @@ Response to subscription statistics requests.
         "subscriberCount": 2,
         "markets": ["ICE"],
         "codes": ["B<00>"],
-        "qualifiedNames": ["SampleQuote"],
-        "namespace": "global",
+        "qualifiedNames": ["global::SampleQuote"],
         "createdAt": "2025-01-01T10:00:00.000Z"
       }
     ]

@@ -14,6 +14,10 @@ export interface AppConfig {
     markets: string
     securities: string
     health: string
+    // Formula API endpoints
+    formulaQuery: string
+    formulaSave: string
+    formulaDelete: string
   }
   wsConfig: {
     reconnectInterval: number
@@ -50,6 +54,10 @@ export const appConfig: AppConfig = {
     markets: getEnvVar('VITE_API_MARKETS', '/api/markets'),
     securities: getEnvVar('VITE_API_SECURITIES', '/api/securities'),
     health: getEnvVar('VITE_API_HEALTH', '/api/health'),
+    // Formula API endpoints (all POST methods)
+    formulaQuery: '/api/formulas/query',
+    formulaSave: '/api/formulas/save',
+    formulaDelete: '/api/formulas/delete',
   },
   wsConfig: {
     reconnectInterval: getEnvNumber('VITE_WS_RECONNECT_INTERVAL', 5000),

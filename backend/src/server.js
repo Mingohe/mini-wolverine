@@ -7,6 +7,7 @@ import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 
 import CaitlynWebSocketService from './services/CaitlynWebSocketService.js';
+import CaitlynBackendService from './services/CaitlynBackendService.js';
 import logger from './utils/logger.js';
 
 dotenv.config();
@@ -387,6 +388,167 @@ app.get('/api/futures/:market', async (req, res) => {
   res.json(marketFutures);
 });
 
+// ============================================================================
+// Formula Management API Endpoints (Caitlyn Backend Rails API)
+// ============================================================================
+
+/**
+ * Query formulas
+ * POST /api/formulas/query
+ * Body: { languageId?, pattern?, privateOnly? }
+ */
+app.post('/api/formulas/query', async (req, res) => {
+  try {
+    if (!caitlynBackendService) {
+      return res.status(503).json({
+        error: 'Formula service not available',
+        message: 'CaitlynBackendService not initialized'
+      });
+    }
+
+    const { language_id, pattern, private_only } = req.body;
+    const formulas = await caitlynBackendService.queryFormulas({
+      languageId: language_id,
+      pattern,
+      privateOnly: private_only
+    });
+
+    res.json({
+      success: true,
+      formulas,
+      count: formulas.length
+    });
+  } catch (error) {
+    logger.error('Error querying formulas:', error);
+    res.status(500).json({
+      error: 'Failed to query formulas',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * Save formula (create or update)
+ * POST /api/formulas/save
+ * Body: { id?, name, sourceCode, languageId, userId? }
+ */
+app.post('/api/formulas/save', async (req, res) => {
+  try {
+    if (!caitlynBackendService) {
+      return res.status(503).json({
+        error: 'Formula service not available',
+        message: 'CaitlynBackendService not initialized'
+      });
+    }
+
+    // Support both snake_case (from frontend) and camelCase
+    const { id, name, source_code, sourceCode, language_id, languageId, user_id, userId, property } = req.body;
+    const finalSourceCode = source_code || sourceCode;
+    const finalLanguageId = language_id !== undefined ? language_id : languageId;
+    const finalUserId = user_id !== undefined ? user_id : userId;
+    const finalProperty = property || '{"add_to_main":false}'; // Default property
+
+    // Validate required fields
+    if (!name || !finalSourceCode || finalLanguageId === undefined) {
+      return res.status(400).json({
+        error: 'Missing required fields',
+        message: 'name, source_code (or sourceCode), and language_id (or languageId) are required'
+      });
+    }
+
+    const formula = await caitlynBackendService.saveFormula({
+      id,
+      name,
+      sourceCode: finalSourceCode,
+      languageId: finalLanguageId,
+      userId: finalUserId,
+      property: finalProperty
+    });
+
+    res.json({
+      success: true,
+      formula,
+      message: id ? 'Formula updated successfully' : 'Formula created successfully'
+    });
+  } catch (error) {
+    logger.error('Error saving formula:', error);
+    res.status(500).json({
+      error: 'Failed to save formula',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * Delete formula
+ * POST /api/formulas/delete
+ * Body: { id }
+ */
+app.post('/api/formulas/delete', async (req, res) => {
+  try {
+    if (!caitlynBackendService) {
+      return res.status(503).json({
+        error: 'Formula service not available',
+        message: 'CaitlynBackendService not initialized'
+      });
+    }
+
+    const { id } = req.body;
+
+    if (!id) {
+      return res.status(400).json({
+        error: 'Missing required field',
+        message: 'id is required'
+      });
+    }
+
+    await caitlynBackendService.deleteFormula(id);
+
+    res.json({
+      success: true,
+      message: 'Formula deleted successfully'
+    });
+  } catch (error) {
+    logger.error('Error deleting formula:', error);
+    res.status(500).json({
+      error: 'Failed to delete formula',
+      message: error.message
+    });
+  }
+});
+
+/**
+ * Health check for Rails backend
+ * GET /api/formulas/health
+ */
+app.get('/api/formulas/health', async (req, res) => {
+  try {
+    if (!caitlynBackendService) {
+      return res.json({
+        healthy: false,
+        message: 'CaitlynBackendService not initialized'
+      });
+    }
+
+    const healthy = await caitlynBackendService.healthCheck();
+
+    res.json({
+      healthy,
+      message: healthy ? 'Rails backend is healthy' : 'Rails backend is not responding'
+    });
+  } catch (error) {
+    logger.error('Error checking Rails backend health:', error);
+    res.json({
+      healthy: false,
+      message: error.message
+    });
+  }
+});
+
+// ============================================================================
+// End of Formula Management API Endpoints
+// ============================================================================
+
 // WebSocket connection handling
 wss.on('connection', (ws, req) => {
   logger.info('New WebSocket connection from frontend - using pre-initialized Caitlyn connection');
@@ -710,7 +872,8 @@ wss.on('connection', (ws, req) => {
             success: true,
             data: result,
             message: `Historical data fetched successfully for ${market}/${code}`,
-            queryParams: { market, code, fromTime, toTime, granularity, fieldCount: fields?.length }
+            queryParams: { market, code, fromTime, toTime, granularity, fieldCount: fields?.length },
+            requestId: data.requestId // 返回前端发送的 requestId
           }));
           
         } catch (error) {
@@ -725,7 +888,8 @@ wss.on('connection', (ws, req) => {
               type: error.name,
               message: error.message,
               stack: error.stack
-            }
+            },
+            requestId: data.requestId // 返回前端发送的 requestId
           }));
         }
         break;
@@ -935,13 +1099,12 @@ wss.on('connection', (ws, req) => {
       case 'subscribe':
         // Handle real-time subscription request
         try {
-          const { markets, codes, qualifiedNames, namespace = 'global', options = {} } = data;
+          const { markets, codes, qualifiedNames, options = {} } = data;
 
           logger.info(`📡 [SERVER] Subscription request received from frontend:`);
           logger.info(`   📊 Markets: ${Array.isArray(markets) ? markets.join(',') : markets}`);
           logger.info(`   🏷️ Codes: ${Array.isArray(codes) ? codes.join(',') : codes}`);
           logger.info(`   🧬 Qualified Names: ${Array.isArray(qualifiedNames) ? qualifiedNames.join(',') : qualifiedNames}`);
-          logger.info(`   🔗 Namespace: ${namespace}`);
           logger.info(`   ⚙️ Options:`, JSON.stringify(options, null, 2));
           logger.info(`   📋 Full request data:`, JSON.stringify(data, null, 2));
 
@@ -955,16 +1118,58 @@ wss.on('connection', (ws, req) => {
           }
 
           // Use subscription hub for automatic deduplication and broadcast
-          const subscriberId = clientHandler.subscribeHub(
+          const subscriberId = await clientHandler.subscribeHub(
             markets,
             codes,
             qualifiedNames,
             (realTimeData) => {
-              // Broadcast real-time data to frontend with original requestId
+              // Filter fields based on subscription request
+              const filteredData = { ...realTimeData };
+              if (filteredData.fields && options.fields && Array.isArray(options.fields)) {
+                const metaName = filteredData.metaName || '';
+                const qualifiedNamesList = Array.isArray(qualifiedNames) ? qualifiedNames : [qualifiedNames];
+
+                // Find the index of this metaName in qualifiedNames using precise matching
+                const metaIndex = qualifiedNamesList.findIndex(qn => {
+                  // Remove namespace prefix for comparison
+                  const qnShort = qn.includes('::') ? qn.split('::')[1] : qn;
+                  const metaShort = metaName.includes('::') ? metaName.split('::')[1] : metaName;
+
+                  // Match: exact match of qualified names, or match short names
+                  return qn === metaName || qnShort === metaShort;
+                });
+                if (metaIndex >= 0) {
+                  // Get the fields array for this metaName
+                  let requestedFields;
+                  if (Array.isArray(options.fields[metaIndex])) {
+                    // 2D array format: fields[metaIndex] is the array for this metaName
+                    requestedFields = options.fields[metaIndex];
+                  } else if (typeof options.fields[0] === 'string' && qualifiedNamesList.length === 1) {
+                    // 1D array format: single qualifiedName
+                    requestedFields = options.fields;
+                  }
+                  if (requestedFields && Array.isArray(requestedFields)) {
+                    // Filter fields to only include requested ones
+                    const filteredFields = {};
+                    requestedFields.forEach(fieldName => {
+                      if (fieldName in filteredData.fields) {
+                        filteredFields[fieldName] = filteredData.fields[fieldName];
+                      }
+                    });
+                    filteredData.fields = filteredFields;
+
+                    logger.debug(`🔍 Filtered ${metaName} (index ${metaIndex} in [${qualifiedNamesList.join(', ')}]) fields: ${Object.keys(filteredFields).join(', ')}`);
+                  }
+                } else {
+                  logger.warn(`⚠️ Could not find metaName "${metaName}" in qualifiedNames: [${qualifiedNamesList.join(', ')}]`);
+                }
+              }
+
+              // Broadcast filtered real-time data to frontend with original requestId
               ws.send(JSON.stringify({
                 type: 'real_time_data',
-                data: realTimeData,
-                subscriberId: subscriberId,
+                data: filteredData,
+                subscriberId: subscriberId, // Use subscriberId from closure
                 requestId: data.requestId, // Include original requestId from subscription request
                 timestamp: new Date().toISOString()
               }));
@@ -973,7 +1178,6 @@ wss.on('connection', (ws, req) => {
           );
 
           logger.info(`✅ Subscription established with subscriber ID: ${subscriberId}`);
-
           ws.send(JSON.stringify({
             type: 'subscription_confirmed',
             subscriberId: subscriberId,
@@ -1094,16 +1298,32 @@ wss.on('connection', (ws, req) => {
   });
 });
 
+// Initialize Caitlyn Backend Service for Rails API communication
+let caitlynBackendService = null;
+try {
+  const railsApiUrl = process.env.RAILS_API_URL || 'http://localhost:3001';
+  const caitlynToken = process.env.CAITLYN_TOKEN;
+  debugger;
+  if (caitlynToken) {
+    caitlynBackendService = new CaitlynBackendService(railsApiUrl, caitlynToken);
+    logger.info(`✅ CaitlynBackendService initialized: ${railsApiUrl}`);
+  } else {
+    logger.warn('⚠️  CAITLYN_TOKEN not provided, CaitlynBackendService disabled');
+  }
+} catch (error) {
+  logger.error('❌ Failed to initialize CaitlynBackendService:', error);
+}
+
 // Initialize enhanced connection pool on startup
 async function initialize() {
   const caitlynUrl = process.env.CAITLYN_WS_URL || 'wss://116.wolverine-box.com/tm';
   const caitlynToken = process.env.CAITLYN_TOKEN;
-  
+
   if (!caitlynToken) {
     logger.error('CAITLYN_TOKEN environment variable is required');
     process.exit(1);
   }
-  
+
   logger.info(`🚀 Initializing enhanced connection pool to: ${caitlynUrl}`);
   
   try {

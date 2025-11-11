@@ -71,8 +71,7 @@ const messages = ref([])
 const testParams = {
   markets: ["NYMEX"],
   codes: ["CL<00>"],
-  qualifiedNames: ["global::SampleQuote"],
-  namespace: "global",
+  qualifiedNames: ["global::SampleQuote"],  // Namespace prefix already included
   options: {
     granularities: [86400],
     fields: ["open", "close", "low", "high", "volume"],

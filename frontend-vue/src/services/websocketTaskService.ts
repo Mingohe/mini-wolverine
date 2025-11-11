@@ -77,8 +77,7 @@ class WebSocketTaskService {
     const pendingTask = this.pendingTasks.value.get(requestId)
 
     if (!pendingTask) {
-      // 没有对应的待处理任务
-      console.log(`⚠️ No pending task found for response:`, { requestId, type: message.type })
+      // Silently ignore - this might be a real-time push (not a task response)
       return
     }
 

@@ -24,16 +24,7 @@ export interface MarketQuote {
   market: string;
   code: string;
   timestamp: number;
-  fields: {
-    open?: number;
-    close?: number;
-    high?: number;
-    low?: number;
-    volume?: number;
-    turnover?: number;
-    change?: number;
-    changeRate?: number;
-  };
+  fields: Record<string, any>;  // Dynamic fields - accept any field from any meta
 }
 
 export interface FutureContract {

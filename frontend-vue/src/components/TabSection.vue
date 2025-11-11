@@ -29,11 +29,19 @@
       </div>
 
       <div v-else-if="activeTab === 'formula'">
+        <FormulaTab />
+      </div>
+
+      <div v-else-if="activeTab === 'formula-viewer'">
         <FormulaViewer />
       </div>
 
       <div v-else-if="activeTab === 'test'">
         <SubscriptionTest />
+      </div>
+
+      <div v-else-if="activeTab === 'dsl-query'">
+        <DSLQueryTab />
       </div>
       
       <div v-else-if="activeTab === 'console'">
@@ -75,8 +83,10 @@ import { useDataStore } from '../stores/dataStore'
 import SchemaViewer from './SchemaViewer.vue'
 import HistoricalDataQuery from './HistoricalDataQuery.vue'
 import FormulaViewer from './FormulaViewer.vue'
+import FormulaTab from './formula/FormulaTab.vue'
 import SubscriptionTest from './SubscriptionTest.vue'
 import WatchlistTab from './WatchlistTab.vue'
+import DSLQueryTab from './DSLQueryTab.vue'
 import type { TabItem } from '@/types'
 
 const dataStore = useDataStore()
@@ -86,7 +96,9 @@ const tabs: TabItem[] = [
   { id: 'watchlist', label: 'Watchlist' },
   { id: 'schema', label: 'Schema & Revisions' },
   { id: 'historical', label: 'Historical Data' },
-  { id: 'formula', label: 'Formula Viewer' },
+  { id: 'formula', label: 'Formula Management' },
+  { id: 'formula-viewer', label: 'Formula Viewer' },
+  { id: 'dsl-query', label: 'DSL Query' },
   { id: 'test', label: 'Subscription Test' },
   { id: 'console', label: 'Console' }
 ]

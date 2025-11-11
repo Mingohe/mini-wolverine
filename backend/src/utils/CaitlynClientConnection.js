@@ -160,8 +160,8 @@ class CaitlynClientConnection {
       }, () => {
         this.logger.info("🤝 WebSocket connected, sending handshake...");
         this.isConnected = true;
+        console.log(`{"cmd":20512, "token":"${this.token}", "protocol":1, "seq":1}`);
         this.emit('connected');
-        
         // Send handshake message
         const handshakeMsg = `{"cmd":20512, "token":"${this.token}", "protocol":1, "seq":1}`;
         this.wsClient.sendText(handshakeMsg);
@@ -297,7 +297,12 @@ class CaitlynClientConnection {
       case this.wasmModule.CMD_AT_CAL_FORMULA:
         this.handleFormulaCalculationResponse(pkg);
         break;
-        
+
+      case this.wasmModule.CMD_TA_PUSH_FORMULA:
+        // 小公式实时推送数据（来自订阅的实时数据流）
+        this.handleFormulaPushData(pkg);
+        break;
+
       default:
         this.logger.debug(`❓ Unhandled command: ${this.getCommandName(cmd)} (${cmd})`);
         let errRes = new this.wasmModule.ATBaseResponse()
@@ -791,10 +796,13 @@ class CaitlynClientConnection {
       
       // Create SVObject with proper metadata configuration from cache
       const svObject = new SVObject(this.wasmModule);
-      
+
       // Configure SVObject with cached query parameters
       svObject.metaName = queryInfo.qualifiedName;
-      svObject.namespace = queryInfo.namespace === 'global' ? this.wasmModule.NAMESPACE_GLOBAL : this.wasmModule.NAMESPACE_PRIVATE;
+      // Handle both string ('global'/'private') and numeric (0/1) namespace formats
+      svObject.namespace = (queryInfo.namespace === 'global' || queryInfo.namespace === 0)
+        ? this.wasmModule.NAMESPACE_GLOBAL
+        : this.wasmModule.NAMESPACE_PRIVATE;
       svObject.granularity = queryInfo.granularity;
       this.logger.info(`✅ Configured SVObject: ${svObject.metaName} (namespace: ${queryInfo.namespace})`);
       
@@ -1312,7 +1320,7 @@ class CaitlynClientConnection {
 
           this.logger.info(`✅ Subscription verification passed for ${subscriptionKey}`);
           this.logger.info(`   🆔 UUID: ${subscriptionInfo.uuid}`);
-          this.logger.info(`   📊 Data: ${record.namespace}::${record.metaName}`);
+          this.logger.info(`   📊 Data: ${record.metaName}`);
           this.logger.info(`   📋 Fields: ${Object.keys(record.fields).length} fields`);
           
           // Call the subscription callback
@@ -1417,21 +1425,21 @@ class CaitlynClientConnection {
       // Extract metadata
       const metaID = sv.metaID;
       const namespace = sv.namespace;
-      
+
       // Find meta information
       const meta = this.schemaByNamespace[namespace]?.[metaID];
       if (!meta) {
         this.logger.debug(`⚠️ Meta not found: ID=${metaID}, namespace=${namespace}`);
         return;
       }
-      
+
       const qualifiedName = meta.name;
       const namespaceStr = namespace === 0 ? 'global' : 'private';
-      
+
       // Try to match to an active subscription
       let matchedSubscription = null;
       let matchedKey = null;
-      
+
       for (const [key, info] of this.subscriptions.entries()) {
         if (info.active && info.qualifiedName === qualifiedName && info.namespace === namespaceStr) {
           matchedSubscription = info;
@@ -1439,13 +1447,14 @@ class CaitlynClientConnection {
           break;
         }
       }
-      
+
       if (!matchedSubscription) {
         this.logger.debug(`📡 No active subscription found for ${qualifiedName} (${namespaceStr})`);
         return;
       }
-      
+
       subscriptionInfo = matchedSubscription;
+      subscriptionInfo.actualMetaName = qualifiedName; // Store the actual metaName from schema
       subscriptionKey = matchedKey;
     }
     try {
@@ -1474,19 +1483,23 @@ class CaitlynClientConnection {
       const market = sv.market;
       const code = sv.stockCode;
 
+      // Use the actual metaName from schema (stored in subscriptionInfo.actualMetaName)
+      // or fall back to qualifiedName from subscriptionInfo
+      const actualMetaName = subscriptionInfo.actualMetaName || subscriptionInfo.qualifiedName || 'global::SampleQuote';
+
       // Create real-time data record
       const realTimeRecord = {
         market: market,
         code: code,
         timestamp: svObject.timetag ? String(svObject.timetag) : String(Date.now()),
-        metaName: subscriptionInfo.qualifiedNames?.[0] || 'global::SampleQuote',
+        metaName: actualMetaName,
         namespace: subscriptionInfo.namespace || 'global',
         fields: objectData.fields || {},
         subscriptionKey: subscriptionKey,
         receivedAt: new Date().toISOString()
       };
 
-      this.logger.debug(`📡 Real-time data: ${market}/${code} (${subscriptionInfo.qualifiedNames?.[0]})`);
+      this.logger.debug(`📡 Real-time data: ${market}/${code} (${actualMetaName})`);
 
       // Call the subscription callback
       const callback = this.subscriptionCallbacks.get(subscriptionKey);
@@ -2104,7 +2117,6 @@ class CaitlynClientConnection {
     this.logger.info(`   🧬 Qualified Names: [${qualifiedNameList.join(', ')}]`);
     this.logger.info(`   ⚙️ Options:`, JSON.stringify(options, null, 2));
     this.logger.info(`   🔑 Subscription Key: ${subscriptionKey}`);
-    
     // Create ATSubscribeReq using WASM - no constructor parameters
     const currentSeq = this.getNextSeq();
     const subscribeReq = new this.wasmModule.ATSubscribeReq();
@@ -2254,7 +2266,6 @@ class CaitlynClientConnection {
       granularities: granularities,
       options: { ...options }
     };
-    
     this.subscriptions.set(subscriptionKey, subscriptionInfo);
     this.subscriptionCallbacks.set(subscriptionKey, callback);
     
@@ -2276,6 +2287,17 @@ class CaitlynClientConnection {
     this.logger.info(`   📊 Markets: [${marketList.join(', ')}], Codes: [${codeList.join(', ')}]`);
     this.logger.info(`   🧬 Qualified Names (${qualifiedNameList.length}): [${qualifiedNameList.join(', ')}]`);
     this.logger.info(`   🏷️ Fields Matrix (${fieldsMatrix.size()} rows): One field set per qualified name`);
+
+    // Log detailed fields matrix content
+    for (let i = 0; i < fieldsMatrix.size(); i++) {
+      const row = fieldsMatrix.get(i);
+      const fieldsInRow = [];
+      for (let j = 0; j < row.size(); j++) {
+        fieldsInRow.push(row.get(j));
+      }
+      this.logger.info(`   🏷️ Fields[${i}] for "${qualifiedNameList[i]}": [${fieldsInRow.join(', ')}]`);
+    }
+
     this.logger.info(`   ⏱️ Granularities: [${granularities.join(', ')}] seconds`);
     // Cleanup WASM objects
     marketsVector.delete();
@@ -2502,6 +2524,7 @@ class CaitlynClientConnection {
       
       // Create registration request
       const regReq = new this.wasmModule.ATRegFormulaReq();
+      regReq.token = this.token;  // CRITICAL: Set token for authentication
       regReq.ID = String(formulaId);  // Convert to string
       regReq.languageID = parseInt(languageId);  // Ensure integer type
       regReq.sourceCode = sourceCode;
@@ -2577,6 +2600,7 @@ class CaitlynClientConnection {
       
       // Create calculation request
       let calReq = new this.wasmModule.ATCalFormulaReq();
+      calReq.token = this.token;  // CRITICAL: Set token for authentication
       // Set parameters using correct property names
       calReq.UUID = uuid;
       calReq.market = market;
@@ -2605,7 +2629,7 @@ class CaitlynClientConnection {
       
       calReq.beginTime = beginTimeStr;
       calReq.endTime = endTimeStr;
-      calReq.isRealTime = isRealTime ? 1 : 0; // Convert boolean to integer (0 or 1)
+      calReq.isRealTime = 1; // Convert boolean to integer (0 or 1)
       // Encode the request
       const encodedRequest = calReq.encode();
       this.sendRequest(this.wasmModule.CMD_AT_CAL_FORMULA, encodedRequest, requestId)
@@ -2726,10 +2750,11 @@ class CaitlynClientConnection {
       } else {
         this.logger.info(`✅ Formula registration successful: UUID=${res.UUID}`);
         if (queryInfo.resolve) {
+          // Return the raw content for registerFormula method to decode
           queryInfo.resolve(pkg.content());
         }
       }
-      
+
       // Clean up
       res.delete();
       this.queryCache.delete(responseSeq);
@@ -2745,25 +2770,25 @@ class CaitlynClientConnection {
    */
   handleFormulaCalculationResponse(pkg) {
     this.logger.info('📥 ===== FORMULA CALCULATION RESPONSE =====');
-    
+
     try {
       // Just decode to get basic info, then pass raw content to calculateFormula
       const res = new this.wasmModule.ATCalFormulaRes();
       res.decode(pkg.content());
-      
+
       this.logger.info(`🔍 Calculation response - seq: ${res.seq}`);
       this.logger.info(`🔍 Calculation response - errorCode: ${res.errorCode}`);
-      
+
       // Find cached request by sequence ID
       const responseSeq = res.seq;
       const queryInfo = this.queryCache.get(responseSeq);
-      
+
       if (!queryInfo) {
         this.logger.error(`❌ No cached request found for seq=${responseSeq}`);
         res.delete();
         return;
       }
-      
+
       if (res.errorCode !== 0) {
         this.logger.error(`❌ Formula calculation failed: errorCode=${res.errorCode}`);
         if (queryInfo.reject) {
@@ -2776,14 +2801,14 @@ class CaitlynClientConnection {
           queryInfo.resolve(res); // Pass the decoded object instead of raw content
         }
       }
-      
+
       // Don't delete res here - it will be used in calculateFormula
       // res.delete(); // Commented out - let calculateFormula handle cleanup
       this.queryCache.delete(responseSeq);
-      
+
     } catch (error) {
       this.logger.error('Error handling formula calculation response:', error);
-      
+
       // Find cached request and reject it
       const responseSeq = pkg.header.seq;
       const queryInfo = this.queryCache.get(responseSeq);
@@ -2791,6 +2816,138 @@ class CaitlynClientConnection {
         queryInfo.reject(new Error('Failed to decode formula calculation response'));
       }
       this.queryCache.delete(responseSeq);
+    }
+  }
+
+  /**
+   * Handle formula real-time push data (CMD_TA_PUSH_FORMULA)
+   * This is the real-time data stream for subscribed formulas
+   */
+  handleFormulaPushData(pkg) {
+    this.logger.info('📡 ===== FORMULA PUSH DATA (Real-time) =====');
+
+    try {
+      const res = new this.wasmModule.ATCalFormulaRTRes();
+      res.decode(pkg.content());
+
+      // Extract properties directly (all are getter functions in Emscripten)
+      const seq = res.seq;
+      const status = res.status;
+      const errorCode = res.errorCode;
+      const uuid = res.UUID;  // Note: UUID is uppercase
+      const market = res.market;
+      const code = res.code;
+      const granularity = res.granularity;
+      const timeTags = res.timeTags || [];
+      const charts = res.charts;  // charts is a method
+
+      this.logger.info(`🔍 Formula push - seq: ${seq}`);
+      this.logger.info(`🔍 Formula push - status: ${status}`);
+      this.logger.info(`🔍 Formula push - errorCode: ${errorCode}`);
+      this.logger.info(`🔍 Formula push - UUID: ${uuid}`);
+      this.logger.info(`🔍 Formula push - market: ${market}`);
+      this.logger.info(`🔍 Formula push - code: ${code}`);
+      this.logger.info(`🔍 Formula push - granularity: ${granularity}`);
+
+      if (errorCode !== 0) {
+        const errorMsg = res.errorMsg || 'Unknown error';
+        this.logger.error(`❌ Formula push error: ${errorMsg} (code: ${errorCode})`);
+        res.delete();
+        return;
+      }
+
+      // Extract formula data
+      const formulaData = {
+        seq: seq,
+        status: status,
+        uuid: uuid,
+        market: market,
+        granularity: granularity,
+        timeTags: timeTags,
+        charts: charts
+      };
+      this.logger.info(`📊 Formula push data - timeTags: ${formulaData.timeTags?.length || 0} timestamps`);
+      this.logger.info(`📊 Formula push data - charts type: ${typeof formulaData.charts}`);
+
+      // Parse formula data using FormulaParserUtil
+      let parsedFormulaData = null;
+      if (formulaData.charts) {
+        try {
+          parsedFormulaData = FormulaParserUtil.processFormulaResults(res, null, this.wasmModule);
+          this.logger.info(`✅ Formula data parsed successfully`);
+          this.logger.info(`   📊 Charts: ${parsedFormulaData.charts?.length || 0}`);
+          this.logger.info(`   🎨 Doodles: ${parsedFormulaData.doodles?.length || 0}`);
+          this.logger.info(`   📋 Parameters: ${parsedFormulaData.parameters?.length || 0}`);
+        } catch (parseError) {
+          this.logger.error(`❌ Error parsing formula data:`, parseError);
+        }
+      }
+
+      // Find matching subscription by market/code (UUID may not be available in push)
+      // Try multiple matching strategies
+      let foundSubscription = null;
+      let subscriptionKey = null;
+
+      // Strategy 1: Try UUID match first
+      if (uuid) {
+        for (const [key, info] of this.subscriptions.entries()) {
+          if (info.uuid === uuid) {
+            foundSubscription = info;
+            subscriptionKey = key;
+            this.logger.info(`✅ Found subscription by UUID: ${subscriptionKey}`);
+            break;
+          }
+        }
+      }
+
+      // Strategy 2: Match by market (STRATEGY market for formulas)
+      if (!foundSubscription) {
+        for (const [key, info] of this.subscriptions.entries()) {
+          // For formula subscriptions, market is usually "STRATEGY"
+          if (info.markets?.includes('STRATEGY') && key.includes('Formula::Data')) {
+            foundSubscription = info;
+            subscriptionKey = key;
+            this.logger.info(`✅ Found subscription by Formula::Data pattern: ${subscriptionKey}`);
+            break;
+          }
+        }
+      }
+      if (foundSubscription && subscriptionKey) {
+        // Get callback from subscriptionCallbacks map
+        const callback = this.subscriptionCallbacks.get(subscriptionKey);
+
+        if (callback) {
+          this.logger.info(`📤 Calling subscription callback for formula push data`);
+
+          // Use subscription info for code (res.code might be empty for formula subscriptions)
+          const subscriptionCode = foundSubscription.codes?.[0] || code;
+
+          // Call the subscription callback with formula data
+          // Note: subscriberId is added by the Hub's broadcastToSubscribers function
+          callback({
+            type: 'formula_push',
+            uuid: uuid,
+            market: market,
+            code: subscriptionCode,
+            granularity: granularity,
+            timeTags: timeTags,
+            charts: parsedFormulaData?.charts || charts,
+            doodles: parsedFormulaData?.doodles || [],
+            rawData: parsedFormulaData,
+            timestamp: new Date().toISOString()
+          });
+        } else {
+          this.logger.warn(`⚠️ No callback found for subscription: ${subscriptionKey}`);
+        }
+      } else {
+        this.logger.warn(`⚠️ No matching subscription found for UUID: ${uuid}`);
+        this.logger.warn(`⚠️ Active subscriptions: ${Array.from(this.subscriptions.entries()).map(([k, v]) => `${k} (UUID: ${v.uuid})`).join(', ')}`);
+      }
+
+      res.delete();
+
+    } catch (error) {
+      this.logger.error('Error handling formula push data:', error);
     }
   }
 }

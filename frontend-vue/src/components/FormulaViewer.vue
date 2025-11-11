@@ -71,14 +71,6 @@
                     </div>
                 </div>
 
-                <div class="view-mode-toggle">
-                    <button :class="['mode-button', { active: viewMode === 'table' }]" @click="viewMode = 'table'">
-                        📊 Table
-                    </button>
-                    <button :class="['mode-button', { active: viewMode === 'chart' }]" @click="viewMode = 'chart'">
-                        📈 Chart
-                    </button>
-                </div>
             </div>
 
             <!-- Query Configuration -->
@@ -207,19 +199,26 @@
                 <div v-if="formulaData.length > 0" class="results-container">
                     <div class="results-header">
                         <h4 class="results-title">
-                            Formula Results ({{ formulaData.length }} records)
+                            Results ({{ formulaData.length }})
                             <span v-if="enableSubscription && isSubscribed" class="subscription-indicator">
-                                🔴 Live
+                                🔴
                             </span>
                         </h4>
                         <div class="results-actions">
-                            <button class="export-button" @click="exportData">📥 Export</button>
+                            <div class="view-mode-toggle">
+                                <button :class="['mode-button', { active: viewMode === 'table' }]" @click="viewMode = 'table'">
+                                    📊
+                                </button>
+                                <button :class="['mode-button', { active: viewMode === 'chart' }]" @click="viewMode = 'chart'">
+                                    📈
+                                </button>
+                            </div>
                             <button
                                 v-if="enableSubscription && isSubscribed"
                                 class="unsubscribe-button"
                                 @click="unsubscribe"
                             >
-                                ⏹️ Stop
+                                ⏹️
                             </button>
                         </div>
                     </div>
@@ -877,8 +876,8 @@ const subscribeToRealTimeData = async () => {
             formulaCode: formulaCode.value,
             market: selectedFutures.value.market,
             code: selectedFutures.value.code,
-            granularity: parseInt(queryParams.value.granularity || "86400"),
-            namespace: "global",
+            granularity: 0, // 实时订阅固定使用0
+            // namespace: "global", // 后端不支持namespace参数，移除
             languageId: selectedFormula.value.language_id || 5,
             registeredUuid: selectedFormula.value.uuid, // 使用公式的UUID
         };
@@ -910,44 +909,114 @@ const subscribeToRealTimeData = async () => {
 const handleFormulaPushData = (data: any) => {
     console.log("📡 Formula push data received:", data);
 
+    // 解析推送数据，支持多种数据格式
+    let recordsToProcess: any[] = [];
+
     if (Array.isArray(data)) {
-        // Append new real-time data to existing data
-        const newData = data.map((record: any, index: number) => {
-            const flatRecord = {
-                ...record,
-                row_id: formulaData.value.length + index + 1,
-                timestamp: record.timestamp
-                    ? new Date(parseInt(record.timestamp)).toISOString()
-                    : new Date().toISOString(),
-                // Preserve original time_tag for chart rendering
-                time_tag: record.timestamp || record.time_tag,
-            };
+        recordsToProcess = data;
+    } else if (data.rawData?.data && Array.isArray(data.rawData.data)) {
+        // 处理包含 rawData 嵌套结构的数据
+        recordsToProcess = data.rawData.data;
 
-            if (record.fields && typeof record.fields === "object") {
-                Object.assign(flatRecord, record.fields);
+        // 更新 display configuration（如果有）
+        if (data.rawData.displayConfiguration) {
+            displayConfiguration.value = data.rawData.displayConfiguration;
+            console.log("📈 Updated display configuration from push data");
+        }
+    } else if (data.data && Array.isArray(data.data)) {
+        recordsToProcess = data.data;
+    }
+
+    if (recordsToProcess.length === 0) {
+        console.warn("⚠️ No valid records to process in push data");
+        return;
+    }
+
+    // 处理实时数据记录
+    const newData = recordsToProcess.map((record: any, index: number) => {
+        const flatRecord = {
+            ...record,
+            row_id: index + 1, // 临时ID，后续会重新分配
+            timestamp: record.time_tag
+                ? new Date(record.time_tag).toISOString()
+                : new Date().toISOString(),
+            // Preserve original time_tag for chart rendering
+            time_tag: record.time_tag || record.__wolverine_header_time_tag || Date.now(),
+        };
+
+        // 移除 __wolverine_header_ 前缀的字段
+        Object.keys(flatRecord).forEach(key => {
+            if (key.startsWith("__wolverine_header_")) {
+                const cleanKey = key.replace("__wolverine_header_", "");
+                if (cleanKey !== "time_tag") {
+                    flatRecord[cleanKey] = flatRecord[key];
+                }
+                delete flatRecord[key];
             }
-
-            return flatRecord;
         });
 
-        formulaData.value = [...formulaData.value, ...newData];
+        return flatRecord;
+    });
 
-        // 跳转到第一页以显示最新数据
-        if (viewMode.value === "table") {
-            currentPage.value = 1;
-        }
+    // 归一化时间戳到分钟级别（最小粒度）
+    const normalizeToMinute = (timeTag: number) => {
+        return Math.floor(timeTag / 60000) * 60000; // 60000ms = 1分钟
+    };
 
-        // Update result fields if new fields are introduced
-        if (newData.length > 0) {
-            const newFields = Object.keys(newData[0]).filter(
-                key => key !== "timestamp" && key !== "row_id" && key !== "time_tag"
-            );
-            resultFields.value = [...new Set([...resultFields.value, ...newFields])];
+    // 合并新数据：如果存在相同分钟的数据，用新数据覆盖
+    const updatedData = [...formulaData.value];
+
+    for (const newRecord of newData) {
+        const newTimeMinute = normalizeToMinute(newRecord.time_tag);
+
+        // 查找是否存在相同分钟的数据
+        const existingIndex = updatedData.findIndex(existing => {
+            const existingTimeMinute = normalizeToMinute(existing.time_tag);
+            return existingTimeMinute === newTimeMinute;
+        });
+
+        if (existingIndex !== -1) {
+            // 覆盖旧数据
+            updatedData[existingIndex] = { ...newRecord };
+            console.log(`🔄 Updated existing record at minute ${new Date(newTimeMinute).toISOString()}`);
+        } else {
+            // 添加新数据到开头
+            updatedData.unshift(newRecord);
+            console.log(`➕ Added new record at minute ${new Date(newTimeMinute).toISOString()}`);
         }
+    }
+
+    formulaData.value = updatedData;
+
+    // 重新分配 row_id（确保连续性）
+    formulaData.value = formulaData.value.map((item, index) => ({
+        ...item,
+        row_id: index + 1
+    }));
+
+    console.log(`✅ Processed ${newData.length} records, total data count: ${formulaData.value.length}`);
+
+    // 跳转到第一页以显示最新数据
+    if (viewMode.value === "table") {
+        currentPage.value = 1;
+    }
+
+    // Update result fields if new fields are introduced
+    if (newData.length > 0) {
+        const newFields = Object.keys(newData[0]).filter(
+            key => key !== "timestamp" && key !== "row_id" && key !== "time_tag"
+        );
+        resultFields.value = [...new Set([...resultFields.value, ...newFields])];
     }
 };
 
 const unsubscribe = async () => {
+    console.log("🔍 Unsubscribe clicked, current state:", {
+        subscriberId: subscriberId.value,
+        isSubscribed: isSubscribed.value,
+        enableSubscription: enableSubscription.value
+    });
+
     if (!subscriberId.value) {
         console.warn("⚠️ No active subscription to cancel");
         return;
@@ -956,12 +1025,15 @@ const unsubscribe = async () => {
     try {
         subscriptionError.value = null;
 
-        const success = await formulaSubscriptionService.unsubscribe(subscriberId.value);
+        const currentSubscriptionId = subscriberId.value;
+        console.log("📞 Calling formulaSubscriptionService.unsubscribe with ID:", currentSubscriptionId);
+        const success = await formulaSubscriptionService.unsubscribe(currentSubscriptionId);
 
         if (success) {
             isSubscribed.value = false;
             subscriberId.value = null;
-            console.log(`⏹️ Formula subscription cancelled: ${subscriberId.value}`);
+            enableSubscription.value = false;
+            console.log(`⏹️ Formula subscription cancelled: ${currentSubscriptionId}`);
         } else {
             throw new Error("Failed to cancel subscription");
         }
@@ -969,6 +1041,11 @@ const unsubscribe = async () => {
         const errorMessage = error instanceof Error ? error.message : "Unsubscription failed";
         subscriptionError.value = errorMessage;
         console.error("❌ Formula unsubscription failed:", errorMessage);
+
+        // Reset state even if unsubscription failed to avoid UI inconsistency
+        isSubscribed.value = false;
+        subscriberId.value = null;
+        enableSubscription.value = false;
     }
 };
 
@@ -1006,9 +1083,6 @@ const renderFieldValue = (value: any): string => {
     return String(value);
 };
 
-const exportData = () => {
-    console.log("Export data functionality to be implemented");
-};
 
 // Tooltip drawing function
 const drawTooltip = (
@@ -1711,7 +1785,7 @@ onUnmounted(async () => {
     display: flex;
     flex-direction: column;
     background: white;
-    overflow: hidden;
+    overflow: scroll;
 }
 
 /* Query Header */
@@ -1763,15 +1837,15 @@ onUnmounted(async () => {
 }
 
 .mode-button {
-    padding: 6px 12px;
+    padding: 4px 8px;
     border: none;
     background: transparent;
     cursor: pointer;
     border-radius: 4px;
-    font-size: 13px;
-    font-weight: 500;
+    font-size: 14px;
     color: #6c757d;
     transition: all 0.2s ease;
+    min-width: 28px;
 }
 
 .mode-button:hover {
@@ -1874,6 +1948,7 @@ onUnmounted(async () => {
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    min-height: 400px; /* 确保在Mac笔记本上有足够的显示高度 */
 }
 
 .results-container {
@@ -1901,25 +1976,10 @@ onUnmounted(async () => {
 
 .results-actions {
     display: flex;
+    align-items: center;
     gap: 8px;
 }
 
-.export-button {
-    padding: 6px 12px;
-    border: 1px solid #dee2e6;
-    background: white;
-    cursor: pointer;
-    border-radius: 4px;
-    font-size: 13px;
-    color: #495057;
-    transition: all 0.2s ease;
-}
-
-.export-button:hover {
-    background: #f8f9fa;
-    border-color: #0066cc;
-    color: #0066cc;
-}
 
 /* Table View */
 .table-view {
@@ -1927,6 +1987,7 @@ onUnmounted(async () => {
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    min-height: 300px; /* 确保表格有足够的显示高度 */
 }
 
 .data-grid {
@@ -1983,6 +2044,7 @@ onUnmounted(async () => {
     flex-direction: column;
     overflow: hidden;
     background: #fafbfc;
+    min-height: 350px; /* 确保图表有足够的显示高度 */
 }
 
 .chart-placeholder {
@@ -2575,11 +2637,11 @@ onUnmounted(async () => {
 .subscription-indicator {
     background: #dc3545;
     color: white;
-    padding: 2px 8px;
-    border-radius: 12px;
-    font-size: 11px;
+    padding: 1px 4px;
+    border-radius: 8px;
+    font-size: 10px;
     font-weight: 600;
-    margin-left: 8px;
+    margin-left: 6px;
     animation: pulse 2s infinite;
 }
 
@@ -2599,11 +2661,12 @@ onUnmounted(async () => {
     background: #dc3545;
     color: white;
     border: none;
-    padding: 6px 12px;
+    padding: 4px 8px;
     border-radius: 4px;
-    font-size: 13px;
+    font-size: 14px;
     cursor: pointer;
     transition: background-color 0.2s;
+    min-width: 28px;
 }
 
 .unsubscribe-button:hover {

@@ -27,6 +27,15 @@ export const useWatchlistStore = defineStore('watchlist', () => {
   const currentSubscriptionId = ref<string | null>(null)
   const isSubscribed = ref(false)
   const realTimeDataCount = ref(0)
+  const subscribedFields = ref<string[]>([]) // 当前订阅的字段列表
+
+  // 列配置状态
+  const columnConfig = ref<{ metas: string[]; fields: Record<string, string[]> }>({
+    metas: ['global::SampleQuote'],
+    fields: {
+      'global::SampleQuote': ['open', 'close', 'low', 'high', 'volume']
+    }
+  })
 
   // 计算属性
   const selectedGroup = computed((): WatchlistGroup | null => {
@@ -52,6 +61,7 @@ export const useWatchlistStore = defineStore('watchlist', () => {
     try {
       await watchlistDB.init()
       await loadWatchlistsFromDB()
+      await loadColumnConfig()
 
       // 初始化 websocketTaskService 和 subscriptionService
       websocketTaskService.initialize(wsStore)
@@ -60,6 +70,38 @@ export const useWatchlistStore = defineStore('watchlist', () => {
       console.log('✅ Watchlist store initialized successfully')
     } catch (error) {
       console.error('❌ Failed to initialize watchlist store:', error)
+      throw error
+    }
+  }
+
+  // 从数据库加载列配置
+  const loadColumnConfig = async (): Promise<void> => {
+    try {
+      const savedConfig = await watchlistDB.getColumnConfig()
+      if (savedConfig) {
+        columnConfig.value = savedConfig
+        console.log('📋 Loaded column config from database:', savedConfig)
+      } else {
+        console.log('📋 Using default column config')
+      }
+    } catch (error) {
+      console.error('❌ Failed to load column config:', error)
+    }
+  }
+
+  // 保存列配置到数据库
+  const saveColumnConfig = async (config: { metas: string[]; fields: Record<string, string[]> }): Promise<void> => {
+    try {
+      columnConfig.value = config
+      await watchlistDB.saveColumnConfig(config)
+      console.log('✅ Column config saved to database:', config)
+
+      // 重新订阅实时数据使用新配置
+      if (isSubscribed.value) {
+        await subscribeRealTimeData()
+      }
+    } catch (error) {
+      console.error('❌ Failed to save column config:', error)
       throw error
     }
   }
@@ -173,6 +215,15 @@ export const useWatchlistStore = defineStore('watchlist', () => {
     await subscribeRealTimeData()
   }
 
+  // 重新订阅实时数据（动态管理订阅）
+  const resubscribeRealTimeData = async (): Promise<void> => {
+    // 如果当前选中组有票子且组被选中，重新订阅
+    if (selectedGroupItems.value.length > 0 && selectedGroupId.value && isSubscribed.value) {
+      console.log('🔄 Re-subscribing due to watchlist changes...')
+      await subscribeRealTimeData()
+    }
+  }
+
   // 添加品种到自选组
   const addToWatchlist = async (groupId: string, item: WatchlistItem): Promise<void> => {
     try {
@@ -202,6 +253,11 @@ export const useWatchlistStore = defineStore('watchlist', () => {
 
       // 主动获取新添加票子的行情数据
       await fetchSingleItemMarketData(item)
+
+      // 如果添加到当前选中组，重新订阅实时数据
+      if (groupId === selectedGroupId.value) {
+        await resubscribeRealTimeData()
+      }
     } catch (error) {
       console.error('❌ Failed to add to watchlist:', error)
       throw error
@@ -225,6 +281,11 @@ export const useWatchlistStore = defineStore('watchlist', () => {
       await watchlistDB.saveGroup(group)
 
       console.log('✅ Removed from watchlist:', market, code)
+
+      // 如果从当前选中组移除，重新订阅实时数据
+      if (groupId === selectedGroupId.value) {
+        await resubscribeRealTimeData()
+      }
     } catch (error) {
       console.error('❌ Failed to remove from watchlist:', error)
       throw error
@@ -307,55 +368,99 @@ export const useWatchlistStore = defineStore('watchlist', () => {
         marketGroups.get(item.market)!.push(item.code)
       })
 
-      // 使用 fetch_by_time API 批量获取数据
       const markets = Array.from(marketGroups.keys())
       const codes = items.map(item => item.code)
       const timeTag = -1  // 使用 -1 获取最新数据
 
-      // 使用 websocketTaskService 发送请求
-      const response = await websocketTaskService.sendTask({
-        type: 'fetch_by_time',
-        params: {
-          markets,
-          codes,
-          timeTag,
-          granularity: 60, // 1小时
-          fields: ['open', 'close', 'high', 'low', 'volume', 'turnover'],
-          metaName: 'SampleQuote',
-          namespace: '0', // 注意：后端期望字符串格式
-          revision: 0
-        }
-      }, { timeout: 15000 })
+      // 为每个配置的 meta 发送请求
+      const fetchPromises = columnConfig.value.metas.map(async (qualifiedName) => {
+        const [namespace, metaName] = qualifiedName.split('::')
+        const namespaceKey = namespace === 'global' ? '0' : '1'
+        const fields = columnConfig.value.fields[qualifiedName] || []
 
-      if (response.success && response.data?.records) {
-        // 处理真实数据
-        response.data.records.forEach((record: any) => {
-          const key = `${record.market}_${record.code}`
-          marketData.value.set(key, {
-            market: record.market,
-            code: record.code,
-            timestamp: record.timestamp || Date.now(),
-            fields: {
-              open: record.fields?.open || 0,
-              close: record.fields?.close || 0,
-              high: record.fields?.high || 0,
-              low: record.fields?.low || 0,
-              volume: record.fields?.volume || 0,
-              turnover: record.fields?.turnover || 0,
-              change: record.fields?.change || 0,
-              changeRate: record.fields?.changeRate || 0
+        if (fields.length === 0) return
+
+        // Find the revision from schema (use the user-selected namespace)
+        let revision = 0
+        const schema = dataStore.schema as any
+
+        if (schema && schema[namespaceKey]) {
+          const namespaceData = schema[namespaceKey]
+          // Find meta with matching name in the specified namespace only
+          Object.values(namespaceData).forEach((metaInfo: any) => {
+            const schemaMetaName = metaInfo.displayName ||
+                                   (metaInfo.name && metaInfo.name.includes("::") ? metaInfo.name.split("::").pop() : metaInfo.name)
+            if (schemaMetaName === metaName && revision === 0) {
+              revision = metaInfo.revision || 0
+              console.log(`✅ Found ${qualifiedName} with revision ${revision}`)
             }
           })
-        })
-        console.log('✅ Updated market data with real data:', response.data.records.length, 'records')
-        dataStore.addLog('info', `Updated market data for ${response.data.records.length} items`)
-      } else {
-        console.error('❌ Fetch by time failed:', response)
-        dataStore.addLog('error', 'Failed to fetch market data', response.error)
-      }
+        }
+
+        if (revision === 0) {
+          console.warn(`⚠️ ${qualifiedName} not found in schema, using revision 0`)
+        }
+
+        console.log(`📊 Fetching ${qualifiedName} with revision ${revision}`)
+
+        try {
+          const response = await websocketTaskService.sendTask({
+            type: 'fetch_by_time',
+            params: {
+              markets,
+              codes,
+              timeTag,
+              granularity: 60, // 1小时
+              fields,
+              metaName,
+              namespace: namespaceKey,  // Use the user-selected namespace
+              revision
+            }
+          }, { timeout: 15000 })
+
+          if (response.success && response.data?.records) {
+            // 处理真实数据
+            response.data.records.forEach((record: any) => {
+              const key = `${record.market}_${record.code}`
+
+              // Get existing data or create new entry
+              const existingData = marketData.value.get(key) || {
+                market: record.market,
+                code: record.code,
+                timestamp: Date.now(),
+                fields: {}
+              }
+
+              // Update timestamp
+              existingData.timestamp = record.timestamp || Date.now()
+
+              // Merge fields from this meta
+              if (record.fields) {
+                existingData.fields = {
+                  ...existingData.fields,
+                  ...record.fields
+                }
+              }
+
+              marketData.value.set(key, existingData)
+            })
+            console.log(`✅ Fetched ${metaName} data: ${response.data.records.length} records`)
+            dataStore.addLog('info', `Fetched ${metaName} data for ${response.data.records.length} items`)
+          } else {
+            console.error(`❌ Fetch ${metaName} failed:`, response)
+            dataStore.addLog('error', `Failed to fetch ${metaName} data`, response.error)
+          }
+        } catch (error) {
+          console.error(`❌ Failed to fetch ${metaName}:`, error)
+          dataStore.addLog('error', `Failed to fetch ${metaName}`, error)
+        }
+      })
+
+      // 等待所有请求完成
+      await Promise.all(fetchPromises)
 
       lastUpdateTime.value = Date.now()
-      console.log('✅ Updated market data for', items.length, 'items')
+      console.log('✅ Updated market data for', items.length, 'items from', columnConfig.value.metas.length, 'meta types')
 
     } catch (error) {
       console.error('❌ Failed to fetch market data:', error)
@@ -392,16 +497,19 @@ export const useWatchlistStore = defineStore('watchlist', () => {
       const codes = selectedGroupItems.value.map(item => item.code)
 
       // 为每个票子提供对应的粒度（服务器要求数量一致）
-      const granularities = codes.map(() => 86400) // 每个票子都是日线数据
+      const granularities = codes.map(() => 60) // 每个票子都是日线数据
+
+      // Use columnConfig for subscription
+      const qualifiedNames = columnConfig.value.metas
+      const fieldsArray = qualifiedNames.map(metaName => columnConfig.value.fields[metaName] || [])
 
       const subscriptionConfig = {
         markets,
         codes,
-        qualifiedNames: ['global::SampleQuote'],
-        namespace: 'global',
+        qualifiedNames,
         options: {
           granularities, // 数量与codes数量一致
-          fields: ['open', 'close', 'low', 'high', 'volume'],
+          fields: fieldsArray,
           start: 0,
           end: 10,
           sort: [],
@@ -409,6 +517,9 @@ export const useWatchlistStore = defineStore('watchlist', () => {
           filters: []
         }
       }
+
+      // Populate subscribedFields by flattening the 2D fields array
+      subscribedFields.value = subscriptionConfig.options.fields.flat()
 
       // 使用 subscriptionService 订阅，带有实时数据回调
       const subscriptionId = await subscriptionService.subscribeWithCallback(
@@ -424,26 +535,33 @@ export const useWatchlistStore = defineStore('watchlist', () => {
           if (realTimeData.data) {
             const data = realTimeData.data
             const key = `${data.market || 'unknown'}_${data.code || 'unknown'}`
+            const metaName = data.metaName || realTimeData.metaName || 'unknown'
+
+            console.log(`📦 Received data for ${key}, metaName: ${metaName}`, data.fields)
 
             if (data.fields) {
-              marketData.value.set(key, {
+              // Get existing market data or create new entry
+              const existingData: MarketQuote = marketData.value.get(key) || {
                 market: data.market || 'unknown',
                 code: data.code || 'unknown',
-                timestamp: data.timestamp || Date.now(),
-                fields: {
-                  open: data.fields.open || 0,
-                  close: data.fields.close || 0,
-                  high: data.fields.high || 0,
-                  low: data.fields.low || 0,
-                  volume: data.fields.volume || 0,
-                  turnover: data.fields.turnover || 0,
-                  change: data.fields.change || 0,
-                  changeRate: data.fields.changeRate || 0
-                }
-              })
+                timestamp: Date.now(),
+                fields: {}
+              }
 
-              console.log('✅ Updated real-time market data:', key, data.fields)
-              dataStore.addLog('info', `Real-time data updated for ${data.market}/${data.code}`)
+              // Update timestamp
+              existingData.timestamp = data.timestamp || Date.now()
+
+              // Generic field merge - merge all incoming fields regardless of metaName
+              existingData.fields = {
+                ...existingData.fields,
+                ...data.fields  // Dynamically merge all fields from incoming data
+              }
+
+              console.log(`✅ Updated ${metaName} fields for ${key}:`, data.fields)
+
+              // Update marketData
+              marketData.value.set(key, existingData)
+              dataStore.addLog('info', `Real-time ${metaName} data updated for ${data.market}/${data.code}`)
             }
           }
         }
@@ -542,6 +660,8 @@ export const useWatchlistStore = defineStore('watchlist', () => {
     currentSubscriptionId,
     isSubscribed,
     realTimeDataCount,
+    subscribedFields,
+    columnConfig,
 
     // 计算属性
     selectedGroup,
@@ -560,11 +680,14 @@ export const useWatchlistStore = defineStore('watchlist', () => {
     // 订阅相关方法
     subscribeRealTimeData,
     unsubscribeRealTimeData,
+    resubscribeRealTimeData,
     showSpotlight,
     hideSpotlight,
     setSortConfig,
     getMarketQuote,
     isItemLoading,
-    loadAllFutures
+    loadAllFutures,
+    // 列配置方法
+    saveColumnConfig
   }
 })

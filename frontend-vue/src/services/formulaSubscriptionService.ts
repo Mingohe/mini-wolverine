@@ -37,6 +37,9 @@ class FormulaSubscriptionService {
   private subscriptions = ref<Map<string, FormulaSubscriptionInfo>>(new Map())
   private realTimeData = ref<Map<string, FormulaRealTimeData[]>>(new Map())
   private nextRequestId = 1
+  // Callback registry: requestId -> callback function
+  private callbacks = new Map<string, (data: any) => void>()
+  private wsStore: any = null
 
   // 生成唯一请求ID
   private generateRequestId(): string {
@@ -45,7 +48,7 @@ class FormulaSubscriptionService {
 
   // 生成订阅键用于去重
   private generateSubscriptionKey(config: FormulaSubscriptionConfig): string {
-    return `${config.market}::${config.code}::${config.formulaName}::${config.granularity}::${config.namespace || 'global'}`
+    return `${config.market}::${config.code}::${config.formulaName}::${config.granularity}`
   }
 
   // 注册公式 (REG) - 第一步
@@ -113,11 +116,10 @@ class FormulaSubscriptionService {
     }
   }
 
-  // 订阅公式 (SUBSCRIBE) - 第三步
-  async subscribeFormula(config: FormulaSubscriptionConfig, registeredUuid: string, _callback: Function): Promise<string> {
-    // 注意：callback 参数保留用于未来扩展，当前使用 websocketTaskService 的回调机制
+  // 订阅公式 (SUBSCRIBE) - 第三步，支持callback
+  async subscribeFormula(config: FormulaSubscriptionConfig, registeredUuid: string, callback?: (data: any) => void): Promise<string> {
     const subscriptionKey = this.generateSubscriptionKey(config)
-    const subscriptionId = this.generateRequestId()
+    const requestId = this.generateRequestId()
 
     // 检查是否已存在相同订阅
     const existingSubscription = Array.from(this.subscriptions.value.values())
@@ -130,28 +132,34 @@ class FormulaSubscriptionService {
 
     // 创建新订阅
     const subscriptionInfo: FormulaSubscriptionInfo = {
-      uuid: subscriptionId,
+      uuid: requestId,
       config: { ...config, registeredUuid },
       status: 'pending',
       createdAt: new Date(),
       dataCount: 0
     }
 
-    this.subscriptions.value.set(subscriptionId, subscriptionInfo)
-    this.realTimeData.value.set(subscriptionId, [])
+    this.subscriptions.value.set(requestId, subscriptionInfo)
+    this.realTimeData.value.set(requestId, [])
 
-    console.log(`📡 Creating new formula subscription: ${subscriptionId}`, config)
+    console.log(`📡 Creating new formula subscription: ${requestId}`, config)
+
+    // 如果提供了callback，注册到callbacks Map
+    if (callback) {
+      this.callbacks.set(requestId, callback)
+      console.log(`📝 Registered callback for subscription: ${requestId}`)
+    }
 
     try {
       // 使用硬编码的订阅参数（参考 wb-subscribe.service.ts）
+      console.log('formula uuid:', registeredUuid)
       const subscribeResponse = await websocketTaskService.sendTask({
         type: "subscribe",
         markets: ["STRATEGY"],                           // 硬编码
         codes: [registeredUuid],                         // 使用注册时获得的UUID
-        qualifiedNames: ["Formula::Data"],               // 硬编码
-        namespace: "global",                             // 硬编码
+        qualifiedNames: ["Formula::Data"],               // 硬编码（包含namespace前缀）
         options: {
-          granularities: [60],                            // 公式订阅使用粒度 0
+          granularities: [config.granularity],           // 使用配置中的粒度值（实时订阅应为0）
           fields: ["formula_res"],                       // 公式结果字段
           start: 0,                                      // 硬编码
           end: 50,                                       // 硬编码
@@ -173,6 +181,24 @@ class FormulaSubscriptionService {
           subscriptionInfo.status = 'active'
           subscriptionInfo.uuid = subscribeUuid           // 更新为订阅UUID
           subscriptionInfo.subscriberId = subscribeUuid   // 保存 subscriberId 用于取消订阅
+
+          // 将subscription从旧key移动到新key（使用subscriberId作为key）
+          this.subscriptions.value.delete(requestId)
+          this.subscriptions.value.set(subscribeUuid, subscriptionInfo)
+          console.log(`🔄 Moved subscription from ${requestId} to ${subscribeUuid}`)
+
+          // 将realTimeData也移动到新key
+          const existingData = this.realTimeData.value.get(requestId) || []
+          this.realTimeData.value.delete(requestId)
+          this.realTimeData.value.set(subscribeUuid, existingData)
+
+          // 如果有callback，将其移动到新的subscriberId下
+          if (callback) {
+            this.callbacks.delete(requestId)
+            this.callbacks.set(subscribeUuid, callback)
+            console.log(`📝 Moved callback to subscriberId: ${subscribeUuid}`)
+          }
+
           console.log(`✅ Formula subscription confirmed: ${subscribeUuid}`)
           return subscribeUuid
         } else {
@@ -181,30 +207,42 @@ class FormulaSubscriptionService {
       } else {
         subscriptionInfo.status = 'error'
         subscriptionInfo.error = subscribeResponse.error || 'Formula subscription failed'
-        console.error(`❌ Formula subscription failed: ${subscriptionId}`, subscribeResponse.error)
+        console.error(`❌ Formula subscription failed: ${requestId}`, subscribeResponse.error)
+
+        // 清理callback
+        if (callback) {
+          this.callbacks.delete(requestId)
+        }
+
         throw new Error(subscriptionInfo.error)
       }
     } catch (error) {
       subscriptionInfo.status = 'error'
       subscriptionInfo.error = error instanceof Error ? error.message : 'Subscription timeout'
-      console.error(`❌ Formula subscription error: ${subscriptionId}`, error)
+      console.error(`❌ Formula subscription error: ${requestId}`, error)
+
+      // 清理callback
+      if (callback) {
+        this.callbacks.delete(requestId)
+      }
+
       throw error
     }
   }
 
   // 简化的公式订阅流程 - 直接订阅（需要预先注册好的UUID）
-  async subscribe(config: FormulaSubscriptionConfig, callback: Function): Promise<string> {
+  async subscribe(config: FormulaSubscriptionConfig, callback?: (data: any) => void): Promise<string> {
     try {
       // 验证是否有注册UUID
       if (!config.registeredUuid) {
         throw new Error('Formula must be registered first. No UUID found in config.')
       }
-      
+
       console.log(`📡 Subscribing to formula with UUID: ${config.registeredUuid}`)
-      
+
       // 直接订阅公式实时数据
       const subscribeUuid = await this.subscribeFormula(config, config.registeredUuid, callback)
-      
+
       return subscribeUuid
     } catch (error) {
       console.error(`❌ Formula subscription failed:`, error)
@@ -227,6 +265,11 @@ class FormulaSubscriptionService {
 
     console.log(`⏹️ Cancelling formula subscription: ${subscriptionId}`)
 
+    // 清理callback
+    this.callbacks.delete(subscriptionId)
+    this.callbacks.delete(subscription.subscriberId || '')
+    console.log(`🧹 Cleared callback for subscription: ${subscriptionId}`)
+
     try {
       // 发送取消订阅请求，使用正确的 subscriberId
       const response = await websocketTaskService.sendTask({
@@ -238,7 +281,7 @@ class FormulaSubscriptionService {
         retryDelay: 1000
       })
 
-      if (response.success) {
+      if (response.type === 'unsubscription_confirmed' || response.success) {
         subscription.status = 'cancelled'
         console.log(`✅ Formula unsubscription confirmed: ${subscriptionId}`)
         return true
@@ -305,14 +348,14 @@ class FormulaSubscriptionService {
   handleWebSocketPushData(message: any): void {
     const { subscriberId, data, timestamp } = message
 
-    if (!subscriberId || !data) {
+    if (!subscriberId && !data) {
       console.error('❌ Formula real-time data missing subscriberId or data')
       return
     }
 
     // 查找对应的订阅
     const subscription = Array.from(this.subscriptions.value.values())
-      .find(sub => sub.uuid === subscriberId)
+      .find(sub => sub.uuid === subscriberId || sub.subscriberId === subscriberId)
 
     if (!subscription) {
       console.warn(`⚠️ Formula subscription not found for subscriberId: ${subscriberId}`)
@@ -328,17 +371,17 @@ class FormulaSubscriptionService {
     const dataArray = Array.isArray(data) ? data : [data]
     const processedData: FormulaRealTimeData[] = dataArray.map((record: any) => ({
       time_tag: record.time_tag || record.timestamp,
-      timestamp: record.timestamp ? 
-        new Date(parseInt(record.timestamp)).toISOString() : 
+      timestamp: record.timestamp ?
+        new Date(parseInt(record.timestamp)).toISOString() :
         new Date().toISOString(),
       fields: record.fields || record,
       subscriptionId: subscriberId,
       receivedAt: timestamp || new Date().toISOString()
     }))
 
-    // 存储实时数据
+    // 存储实时数据 - 使用 unshift 将新数据放到数组开头
     const existingData = this.realTimeData.value.get(subscriberId) || []
-    this.realTimeData.value.set(subscriberId, [...existingData, ...processedData])
+    this.realTimeData.value.set(subscriberId, [...processedData, ...existingData])
 
     // 更新订阅信息
     subscription.lastDataReceived = new Date()
@@ -348,6 +391,17 @@ class FormulaSubscriptionService {
       recordCount: processedData.length,
       totalDataCount: subscription.dataCount
     })
+
+    // 调用注册的callback（如果存在）
+    const callback = this.callbacks.get(subscriberId) || this.callbacks.get(subscription.uuid)
+    if (callback) {
+      try {
+        callback(message)
+        console.log(`✅ Callback executed for subscription: ${subscriberId}`)
+      } catch (error) {
+        console.error(`❌ Error executing callback for subscription ${subscriberId}:`, error)
+      }
+    }
 
     // 触发自定义事件
     window.dispatchEvent(new CustomEvent('formulaRealTimeDataReceived', {
@@ -450,7 +504,10 @@ class FormulaSubscriptionService {
       console.warn('⚠️ Cannot initialize WebSocket handlers: wsStore not provided')
       return undefined
     }
-    
+
+    this.wsStore = wsStore
+    console.log('📡 FormulaSubscriptionService initialized with WebSocket store')
+
     // 监听WebSocket消息
     const unwatch = wsStore.$subscribe((_mutation: any, state: any) => {
       const lastMessage = state.lastMessage
@@ -458,14 +515,23 @@ class FormulaSubscriptionService {
 
       switch (lastMessage.type) {
         case 'real_time_data':
-          // 检查是否是公式推送数据
-          if (lastMessage.subscriberId) {
-            this.handleWebSocketPushData(lastMessage)
+          // subscriberId is at top level from server.js
+          if (lastMessage.subscriberId && lastMessage.data) {
+            this.handleWebSocketPushData({
+              subscriberId: lastMessage.subscriberId,
+              data: lastMessage.data,
+              timestamp: lastMessage.data.timestamp || lastMessage.timestamp
+            })
           }
           break
+        case 'formula_push':
         case 'formula_push_data':
-          // 专门的公式推送数据
-          this.handleWebSocketPushData(lastMessage)
+          // Direct formula push data
+          this.handleWebSocketPushData({
+            subscriberId: lastMessage.subscriberId,
+            data: lastMessage,
+            timestamp: lastMessage.timestamp
+          })
           break
       }
     })

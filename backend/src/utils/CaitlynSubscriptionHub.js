@@ -186,14 +186,15 @@ export default class CaitlynSubscriptionHub {
       this.logger.warn(`⚠️ Hub: No subscribers for ${subscriptionKey}`);
       return;
     }
-    
+
     this.stats.messagesReceived++;
-    
+
     let successCount = 0;
     let errorCount = 0;
-    
+
     for (const subscriber of subscriberSet) {
       try {
+        // Call subscriber callback with original data (subscriberId handled by server.js)
         subscriber.callback(data);
         successCount++;
       } catch (error) {
@@ -201,7 +202,7 @@ export default class CaitlynSubscriptionHub {
         this.logger.error(`❌ Hub: Error in subscriber callback for ${subscriptionKey}:`, error);
       }
     }
-    
+
     this.logger.debug(`📡 Hub: Broadcasted to ${successCount} subscribers for ${subscriptionKey} (${errorCount} errors)`);
   }
 
@@ -214,9 +215,10 @@ export default class CaitlynSubscriptionHub {
    * @returns {string} subscription key
    */
   generateSubscriptionKey(markets, codes, qualifiedNames, options) {
-    const marketStr = Array.isArray(markets) ? markets.sort().join(',') : markets;
-    const codeStr = Array.isArray(codes) ? codes.sort().join(',') : codes;
-    const qnameStr = Array.isArray(qualifiedNames) ? qualifiedNames.sort().join(',') : qualifiedNames;
+    // IMPORTANT: Create copies before sorting to avoid mutating original arrays
+    const marketStr = Array.isArray(markets) ? [...markets].sort().join(',') : markets;
+    const codeStr = Array.isArray(codes) ? [...codes].sort().join(',') : codes;
+    const qnameStr = Array.isArray(qualifiedNames) ? [...qualifiedNames].sort().join(',') : qualifiedNames;
 
     // Create deterministic options string (exclude callback-specific options)
     const optsCopy = { ...options };

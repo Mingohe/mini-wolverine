@@ -36,28 +36,6 @@
         <span class="btn-icon">🗑️</span>
         Delete Group
       </button>
-
-      <div class="toolbar-divider"></div>
-
-      <button
-        class="toolbar-btn"
-        @click="$emit('import-data')"
-        title="Import watchlist data"
-      >
-        <span class="btn-icon">📥</span>
-        Import
-      </button>
-
-      <button
-        class="toolbar-btn"
-        @click="$emit('export-data')"
-        :disabled="!selectedGroup || selectedGroup.items.length === 0"
-        title="Export current watchlist data"
-      >
-        <span class="btn-icon">📤</span>
-        Export
-      </button>
-
       <div class="toolbar-divider"></div>
 
       <button

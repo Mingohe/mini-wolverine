@@ -2,6 +2,19 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { LogEntry, HistoricalDataEntry } from '@/types'
 
+export interface FormulaListItem {
+  id: number
+  name: string
+  source_code: string
+  language_id: number
+  created_at: string
+  updated_at: string
+  owner_user_id: number
+  is_public: boolean
+  property?: string
+  description?: string
+}
+
 export const useDataStore = defineStore('data', () => {
   // State
   const schema = ref({})
@@ -12,9 +25,13 @@ export const useDataStore = defineStore('data', () => {
   const rawMessages = ref<any[]>([])
   const maxLogs = ref(1000)
   const maxRawMessages = ref(100)
+  const formulaList = ref<FormulaListItem[]>([])
+  const formulaListLoading = ref(false)
+  const formulaListLastFetched = ref<number | null>(null)
 
   // Computed
   const isSchemaLoaded = computed(() => Object.keys(schema.value).length > 0)
+  const isFormulaListLoaded = computed(() => formulaList.value.length > 0)
   
   const dataCount = computed(() => {
     return Object.values(marketData.value).reduce((total, namespace) => {
@@ -156,6 +173,21 @@ export const useDataStore = defineStore('data', () => {
     console.log(`Historical data exported as ${filename}`)
   }
 
+  // Formula List Actions
+  const setFormulaList = (formulas: FormulaListItem[]) => {
+    formulaList.value = formulas
+    formulaListLastFetched.value = Date.now()
+  }
+
+  const clearFormulaList = () => {
+    formulaList.value = []
+    formulaListLastFetched.value = null
+  }
+
+  const findFormulaByName = (name: string): FormulaListItem | undefined => {
+    return formulaList.value.find(f => f.name === name)
+  }
+
   return {
     // State
     schema,
@@ -166,9 +198,13 @@ export const useDataStore = defineStore('data', () => {
     rawMessages,
     maxLogs,
     maxRawMessages,
+    formulaList,
+    formulaListLoading,
+    formulaListLastFetched,
     
     // Computed
     isSchemaLoaded,
+    isFormulaListLoaded,
     dataCount,
     
     // Actions
@@ -182,6 +218,9 @@ export const useDataStore = defineStore('data', () => {
     addRawMessage,
     clearRawMessages,
     exportLogs,
-    exportHistoricalData
+    exportHistoricalData,
+    setFormulaList,
+    clearFormulaList,
+    findFormulaByName
   }
 })
