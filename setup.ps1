@@ -23,8 +23,14 @@ function Cache-Files {
     foreach ($file in $FilesToCache) {
         $filePath = Join-Path $ScriptDir $file
         if (Test-Path $filePath) {
-            Copy-Item $filePath (Join-Path $CacheDir $file) -Force
-            Write-Host "  ✅ Cached: $file" -ForegroundColor Green
+            # Verify it's actually a file (not a directory or system file)
+            $item = Get-Item $filePath -ErrorAction SilentlyContinue
+            if ($item -and $item.PSIsContainer -eq $false) {
+                Copy-Item $filePath (Join-Path $CacheDir $file) -Force
+                Write-Host "  ✅ Cached: $file" -ForegroundColor Green
+            } else {
+                Write-Host "  ⚠️  Skipping: $file (not a regular file)" -ForegroundColor Yellow
+            }
         } else {
             Write-Host "  ℹ️  File not found (will be created): $file" -ForegroundColor Gray
         }
@@ -116,16 +122,28 @@ function Main {
         git clone -b dev https://github.com/Mingohe/mini-wolverine.git $TempDir
         
         # Copy files from temp directory to current directory
+        # Only copy visible files and .git directory, exclude system files
         Write-Host "📋 Copying files to current directory..." -ForegroundColor Cyan
-        Get-ChildItem $TempDir -Force | ForEach-Object {
+        
+        # Copy visible files and directories (exclude hidden system files)
+        Get-ChildItem $TempDir -File | ForEach-Object {
             $targetPath = Join-Path $ScriptDir $_.Name
-            if ($_.PSIsContainer) {
-                if (-not (Test-Path $targetPath)) {
-                    Copy-Item $_.FullName $targetPath -Recurse -Force
-                }
-            } else {
-                Copy-Item $_.FullName $targetPath -Force
+            Copy-Item $_.FullName $targetPath -Force
+        }
+        
+        # Copy visible directories (exclude .git for now)
+        Get-ChildItem $TempDir -Directory | Where-Object { $_.Name -notlike ".*" } | ForEach-Object {
+            $targetPath = Join-Path $ScriptDir $_.Name
+            if (-not (Test-Path $targetPath)) {
+                Copy-Item $_.FullName $targetPath -Recurse -Force
             }
+        }
+        
+        # Copy .git directory only (if it exists)
+        $gitDir = Join-Path $TempDir ".git"
+        if (Test-Path $gitDir) {
+            $targetGitDir = Join-Path $ScriptDir ".git"
+            Copy-Item $gitDir $targetGitDir -Recurse -Force
         }
         
         Write-Host "✅ Repository cloned successfully" -ForegroundColor Green

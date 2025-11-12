@@ -19,10 +19,17 @@ cache_files() {
     echo "📦 Caching existing files..."
     mkdir -p "$CACHE_DIR"
     
+    # Only cache the specific files we care about
     for file in "${FILES_TO_CACHE[@]}"; do
-        if [ -f "$SCRIPT_DIR/$file" ]; then
-            cp "$SCRIPT_DIR/$file" "$CACHE_DIR/$file"
-            echo "  ✅ Cached: $file"
+        file_path="$SCRIPT_DIR/$file"
+        if [ -f "$file_path" ]; then
+            # Verify it's actually a file (not a directory or symlink to something weird)
+            if [ -f "$file_path" ] && [ ! -L "$file_path" ]; then
+                cp "$file_path" "$CACHE_DIR/$file"
+                echo "  ✅ Cached: $file"
+            else
+                echo "  ⚠️  Skipping: $file (not a regular file)"
+            fi
         else
             echo "  ℹ️  File not found (will be created): $file"
         fi
@@ -106,9 +113,18 @@ main() {
     git clone -b dev https://github.com/Mingohe/mini-wolverine.git "$TEMP_DIR"
     
     # Move files from temp directory to current directory
+    # Only copy visible files and .git directory, exclude system files
     echo "📋 Copying files to current directory..."
-    cp -r "$TEMP_DIR"/* "$SCRIPT_DIR/" 2>/dev/null || true
-    cp -r "$TEMP_DIR"/.* "$SCRIPT_DIR/" 2>/dev/null || true
+    
+    # Copy all visible files and directories (excluding hidden files)
+    if [ -n "$(ls -A "$TEMP_DIR" 2>/dev/null)" ]; then
+        find "$TEMP_DIR" -maxdepth 1 -mindepth 1 ! -name '.*' -exec cp -r {} "$SCRIPT_DIR/" \;
+    fi
+    
+    # Copy .git directory only (if it exists)
+    if [ -d "$TEMP_DIR/.git" ]; then
+        cp -r "$TEMP_DIR/.git" "$SCRIPT_DIR/" 2>/dev/null || true
+    fi
     
     # Clean up temp directory
     rm -rf "$TEMP_DIR"
