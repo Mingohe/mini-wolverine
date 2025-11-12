@@ -6,6 +6,40 @@ A modern full-stack financial data processing application that enables financial
 
 **Core Philosophy**: Fully functioning, minimized, and **AI-friendly** - perfect for AI coding agents like Cursor and Claude Code.
 
+## 🚀 One-Click Setup (For AI Agents & Humans)
+
+**If you have received these files**: `README.md`, `docker-compose.yml`, `Makefile`, `setup.sh`, `setup.ps1`
+
+You can use them to set up the development environment in one command:
+
+**Quick Start:**
+```bash
+# Linux/Mac/Git Bash/WSL
+./setup.sh
+
+# Windows PowerShell
+powershell -ExecutionPolicy Bypass -File setup.ps1
+
+# Or using Makefile (if Make is installed)
+make setup
+```
+
+**What the setup script does:**
+1. ✅ Caches existing files (`README.md`, `Makefile`, `docker-compose.yml`) if they exist
+2. ✅ Clones the repository (dev branch) to current directory
+3. ✅ Handles file conflicts intelligently
+4. ✅ Restores cached files if needed
+
+**After setup:**
+1. Edit `.env` file and set your `CAITLYN_TOKEN` (the setup script creates this file for you)
+2. Run `make dev` to start the development environment
+
+**For AI Agents:**
+- All setup instructions are in this README.md
+- File caching logic is documented in setup scripts
+- Platform detection is handled automatically
+- See "⚠️ Important: File Management During Setup" section for details
+
 ## 🎯 Project Vision
 
 Mini Wolverine bridges the gap between complex financial infrastructure and practical application development:
@@ -21,41 +55,132 @@ Mini Wolverine bridges the gap between complex financial infrastructure and prac
 
 ## 🚀 Quick Start Guide
 
-### Method 1: Using Makefile (Recommended, Simplest)
+### ⚠️ Important: File Management During Setup
+
+Before cloning the repository, this project uses a **file caching mechanism** to handle conflicts with existing files (`README.md`, `Makefile`, `docker-compose.yml`). Here's how it works:
+
+**File Caching Logic:**
+1. **Before cloning**: If these files exist in your current directory, they will be cached in `.setup-cache/`
+2. **After cloning**: 
+   - If the cloned repository contains these files → **Delete cached files** (use repo versions)
+   - If the cloned repository is missing these files → **Restore cached files** (keep your versions)
+
+**Why this matters:**
+- `git clone` creates a new directory, but you may want to clone directly into your current directory
+- These files (`README.md`, `Makefile`, `docker-compose.yml`) are essential for setup
+- The caching ensures you don't lose important configuration while getting the latest code
+
+**For AI Agents:**
+When setting up this project, implement the file caching logic:
+1. Check if `README.md`, `Makefile`, `docker-compose.yml` exist in current directory
+2. If they exist, cache them to `.setup-cache/` before cloning
+3. After cloning, check if these files exist in the cloned repository
+4. If they exist in repo → remove cache; if missing → restore from cache
+
+### Method 1: Using Setup Script (Recommended for Beginners)
+
+**Automatic Setup (Handles file caching automatically):**
+
+**For Linux/Mac/Git Bash/WSL:**
+```bash
+# 1. Download and run the bash setup script
+curl -o setup.sh https://raw.githubusercontent.com/Mingohe/mini-wolverine/dev/setup.sh
+chmod +x setup.sh
+./setup.sh
+
+# Or if you already have the script:
+./setup.sh
+```
+
+**For Windows (PowerShell):**
+```powershell
+# 1. Download and run the PowerShell setup script
+Invoke-WebRequest -Uri https://raw.githubusercontent.com/Mingohe/mini-wolverine/dev/setup.ps1 -OutFile setup.ps1
+powershell -ExecutionPolicy Bypass -File setup.ps1
+
+# Or if you already have the script:
+powershell -ExecutionPolicy Bypass -File setup.ps1
+```
+
+**For Windows (Git Bash):**
+```bash
+# Git Bash can use the bash script
+curl -o setup.sh https://raw.githubusercontent.com/Mingohe/mini-wolverine/dev/setup.sh
+chmod +x setup.sh
+./setup.sh
+```
+
+**Using Makefile (Cross-platform):**
+```bash
+# Makefile will detect your platform and use the appropriate script
+make setup
+```
+
+The setup script will:
+- ✅ Cache existing files (`README.md`, `Makefile`, `docker-compose.yml`) if they exist
+- ✅ Clone the repository (dev branch) to current directory
+- ✅ Handle file conflicts intelligently
+- ✅ Restore cached files if needed
+
+**Manual Setup (If you prefer manual control):**
 
 ```bash
-# 1. Clone the repository
-git clone https://github.com/Mingohe/mini-wolverine.git
-cd mini-wolverine
+# 1. Cache existing files (if they exist)
+mkdir -p .setup-cache
+[ -f README.md ] && cp README.md .setup-cache/README.md
+[ -f Makefile ] && cp Makefile .setup-cache/Makefile
+[ -f docker-compose.yml ] && cp docker-compose.yml .setup-cache/docker-compose.yml
 
-# 2. Switch to dev branch (Important!)
-git checkout dev
+# 2. Clone repository to current directory
+git clone -b dev https://github.com/Mingohe/mini-wolverine.git .
 
-# 3. Start development environment (auto-pull, build containers, start services)
+# 3. Check if files exist in cloned repo and handle cache
+if [ -f README.md ] && [ -f Makefile ] && [ -f docker-compose.yml ]; then
+    # Files exist in repo, remove cache
+    rm -rf .setup-cache
+else
+    # Files missing, restore from cache
+    [ -f .setup-cache/README.md ] && cp .setup-cache/README.md README.md
+    [ -f .setup-cache/Makefile ] && cp .setup-cache/Makefile Makefile
+    [ -f .setup-cache/docker-compose.yml ] && cp .setup-cache/docker-compose.yml docker-compose.yml
+    rm -rf .setup-cache
+fi
+
+# 4. Edit .env file and set CAITLYN_TOKEN (setup script creates this file)
+# 5. Start development environment
+make dev
+```
+
+### Method 2: Using Makefile (After Setup)
+
+**After cloning and setting up files:**
+
+```bash
+# 1. Configure CAITLYN_TOKEN (see Step 2 below)
+
+# 2. Start development environment
 make dev
 
-# 4. Access services
+# 3. Access services
 # - Vue Frontend: http://localhost:3002
 # - Backend API: http://localhost:4000/api/health
 ```
 
-### Method 2: Using Docker Compose
+### Method 3: Using Docker Compose Directly
+
+**After cloning and setting up files:**
 
 ```bash
-# 1. Clone the repository
-git clone https://github.com/Mingohe/mini-wolverine.git
-cd mini-wolverine
+# 1. Edit .env file and set CAITLYN_TOKEN (setup script creates this file)
+nano .env  # or notepad .env on Windows
 
-# 2. Switch to dev branch (Important!)
-git checkout dev
-
-# 3. Start all services
+# 2. Start all services
 docker compose up -d
 
-# 4. Check service status
+# 3. Check service status
 docker compose ps
 
-# 5. View logs
+# 4. View logs
 docker compose logs -f
 ```
 
@@ -100,36 +225,31 @@ make rebuild       # Clean + rebuild + start
 
 **CAITLYN_TOKEN is the authentication key for the backend to connect to the Wolverine service. It must be set for normal operation!**
 
-#### Method 1: Using Environment Variables (Recommended)
+**Setup script automatically creates a `.env` file for you. You just need to:**
 
-```bash
-# Set your CAITLYN_TOKEN
-export CAITLYN_TOKEN=your_caitlyn_token_here
+1. **Edit the `.env` file** and replace `your_caitlyn_token_here` with your actual token:
+   ```bash
+   # Linux/Mac
+   nano .env
+   
+   # Windows
+   notepad .env
+   ```
 
-# Start services
-make dev
-```
+2. **Set your CAITLYN_TOKEN** in the `.env` file:
+   ```
+   CAITLYN_TOKEN=your_actual_token_here
+   ```
 
-#### Method 2: Modify docker-compose.yml
+3. **Start the development environment**:
+   ```bash
+   make dev
+   ```
 
-Edit the `docker-compose.yml` file and replace the `CAITLYN_TOKEN` value with your actual token:
-
-```yaml
-environment:
-  - CAITLYN_TOKEN=your_caitlyn_token_here  # Replace with your actual token
-```
-
-#### Method 3: Using .env File (Recommended for Production)
-
-```bash
-# Create .env file
-echo "CAITLYN_TOKEN=your_caitlyn_token_here" > .env
-
-# docker-compose will automatically read .env file
-docker compose up -d
-```
-
-**Note**: The default token in `docker-compose.yml` is for demonstration only. Please replace it with your own token for actual use.
+**How to get your CAITLYN_TOKEN:**
+- Contact your administrator
+- Check Wolverine service documentation
+- The token is required for backend authentication
 
 
 ## 🏗️ Architecture Overview
@@ -328,16 +448,80 @@ Before starting services, you need to:
 1. **Get your CAITLYN_TOKEN** (contact administrator or check Wolverine service documentation)
 2. **Set environment variable** or modify configuration file (see instructions below)
 
-### Step 1: Clone Code
+### Step 1: Clone Code and Handle File Conflicts
+
+**⚠️ Important: File Caching Mechanism**
+
+Before cloning, you need to handle potential conflicts with existing files (`README.md`, `Makefile`, `docker-compose.yml`). The project uses a caching mechanism to preserve important files.
+
+**Option A: Using Setup Script (Recommended)**
+
+**For Linux/Mac/Git Bash/WSL:**
+```bash
+# Download and run bash setup script
+curl -o setup.sh https://raw.githubusercontent.com/Mingohe/mini-wolverine/dev/setup.sh
+chmod +x setup.sh
+./setup.sh
+```
+
+**For Windows (PowerShell):**
+```powershell
+# Download and run PowerShell setup script
+Invoke-WebRequest -Uri https://raw.githubusercontent.com/Mingohe/mini-wolverine/dev/setup.ps1 -OutFile setup.ps1
+powershell -ExecutionPolicy Bypass -File setup.ps1
+```
+
+**For Windows (Git Bash):**
+```bash
+# Git Bash can use the bash script
+curl -o setup.sh https://raw.githubusercontent.com/Mingohe/mini-wolverine/dev/setup.sh
+chmod +x setup.sh
+./setup.sh
+```
+
+**Using Makefile (Cross-platform):**
+```bash
+# Makefile will detect your platform
+make setup
+```
+
+**Option B: Manual Setup**
 
 ```bash
-# Clone repository
-git clone https://github.com/Mingohe/mini-wolverine.git
-cd mini-wolverine
+# 1. Cache existing files (if they exist in current directory)
+mkdir -p .setup-cache
+[ -f README.md ] && cp README.md .setup-cache/README.md && echo "✅ Cached README.md"
+[ -f Makefile ] && cp Makefile .setup-cache/Makefile && echo "✅ Cached Makefile"
+[ -f docker-compose.yml ] && cp docker-compose.yml .setup-cache/docker-compose.yml && echo "✅ Cached docker-compose.yml"
 
-# ⚠️ Important: Switch to dev branch
-git checkout dev
+# 2. Clone repository (dev branch) to current directory
+git clone -b dev https://github.com/Mingohe/mini-wolverine.git .
+
+# 3. Handle file conflicts
+# Check if all three files exist in cloned repository
+if [ -f README.md ] && [ -f Makefile ] && [ -f docker-compose.yml ]; then
+    echo "✅ All files found in repository, removing cache..."
+    rm -rf .setup-cache
+else
+    echo "⚠️  Some files missing in repository, restoring from cache..."
+    [ -f .setup-cache/README.md ] && cp .setup-cache/README.md README.md && echo "✅ Restored README.md"
+    [ -f .setup-cache/Makefile ] && cp .setup-cache/Makefile Makefile && echo "✅ Restored Makefile"
+    [ -f .setup-cache/docker-compose.yml ] && cp .setup-cache/docker-compose.yml docker-compose.yml && echo "✅ Restored docker-compose.yml"
+    rm -rf .setup-cache
+fi
 ```
+
+**File Caching Logic Explained:**
+
+1. **Before Clone**: Cache `README.md`, `Makefile`, `docker-compose.yml` if they exist in current directory
+2. **After Clone**: 
+   - **If files exist in repo** → Delete cache (use repository versions)
+   - **If files missing in repo** → Restore from cache (preserve your versions)
+
+**Why this is needed:**
+- These files are essential for project setup and configuration
+- `git clone` may overwrite or miss these files
+- Caching ensures you don't lose important local configurations
 
 ### Step 2: Configure CAITLYN_TOKEN
 
@@ -773,6 +957,268 @@ function FinancialChart({ historicalData }) {
 }
 ```
 
+## 🐳 Docker Compose Guide
+
+### Quick Start with Docker Compose
+
+Docker Compose provides a simple way to manage all services in the project. **We recommend using Makefile commands** for easier service management.
+
+#### Prerequisites
+
+- Docker Desktop (Mac/Windows) or Docker Engine (Linux)
+- Docker Compose V2 (comes with newer Docker versions)
+- Make (built-in on Mac/Linux, needs installation on Windows)
+
+#### Step 1: Configure CAITLYN_TOKEN
+
+Before starting, you must configure your CAITLYN_TOKEN:
+
+**Option 1: Environment Variable (Recommended)**
+```bash
+export CAITLYN_TOKEN=your_caitlyn_token_here
+make dev
+```
+
+**Option 2: .env File**
+```bash
+# Create .env file in project root
+echo "CAITLYN_TOKEN=your_caitlyn_token_here" > .env
+make dev
+```
+
+**Option 3: Direct Edit**
+Edit `docker-compose.yml` and replace `${CAITLYN_TOKEN}` with your actual token.
+
+#### Step 2: Start Services
+
+**Using Makefile (Recommended):**
+```bash
+# Start all services in development mode
+make dev
+```
+
+**Or using Docker Compose directly:**
+```bash
+# Start all services in detached mode
+docker compose up -d
+
+# Or start with logs visible
+docker compose up
+```
+
+#### Step 3: Verify Services
+
+**Using Makefile (Recommended):**
+```bash
+# Check service health status
+make health
+
+# Run connectivity tests
+make test
+```
+
+**Or using Docker Compose directly:**
+```bash
+# Check service status
+docker compose ps
+
+# Expected output:
+# NAME                          STATUS              PORTS
+# mini-wolverine-backend-dev    Up                  0.0.0.0:4000->4000/tcp
+# mini-wolverine-vue-dev        Up                  0.0.0.0:3002->3002/tcp
+```
+
+#### Step 4: Access Services
+
+- **Vue Frontend**: http://localhost:3002
+- **Backend API**: http://localhost:4000/api/health
+- **Backend Schema API**: http://localhost:4000/api/schema
+- **Backend Markets API**: http://localhost:4000/api/markets
+- **WebSocket**: ws://localhost:4000
+
+### Common Commands
+
+#### Using Makefile (Recommended)
+
+```bash
+# Service Management
+make dev              # Start development environment
+make stop             # Stop all services
+make restart          # Restart all services
+make clean            # Clean containers and volumes
+make build            # Rebuild all containers
+make rebuild          # Clean + rebuild + start
+
+# Viewing Logs
+make logs             # View all service logs
+make vue-logs         # View Vue frontend logs
+make backend-logs     # View backend logs
+
+# Service Status
+make health            # Check service health
+make test              # Run connectivity tests
+```
+
+#### Using Docker Compose Directly
+
+If you prefer using Docker Compose commands directly:
+
+**Service Management:**
+```bash
+# Start services
+docker compose up -d              # Start in background
+docker compose up                 # Start with logs
+
+# Stop services
+docker compose stop               # Stop but keep containers
+docker compose down               # Stop and remove containers
+docker compose down -v            # Stop and remove containers + volumes
+
+# Restart services
+docker compose restart            # Restart all services
+docker compose restart backend     # Restart specific service
+docker compose restart vue-app    # Restart Vue frontend
+```
+
+**Viewing Logs:**
+```bash
+# View all logs
+docker compose logs -f
+
+# View specific service logs
+docker compose logs -f backend    # Backend logs
+docker compose logs -f vue-app    # Vue frontend logs
+
+# View last N lines
+docker compose logs --tail=100 backend
+```
+
+**Service Status and Health:**
+```bash
+# Check service status
+docker compose ps
+
+# Check service health
+curl http://localhost:4000/api/health
+
+# View resource usage
+docker compose top
+```
+
+**Rebuilding Services:**
+```bash
+# Rebuild all services
+docker compose build
+
+# Rebuild specific service
+docker compose build backend
+docker compose build vue-app
+
+# Rebuild and restart
+docker compose up -d --build
+```
+
+**Environment Variables:**
+```bash
+# Override environment variables
+CAITLYN_TOKEN=your_token docker compose up -d
+
+# Use .env file (automatically loaded)
+# Create .env file with:
+# CAITLYN_TOKEN=your_token_here
+docker compose up -d
+```
+
+### Service Configuration
+
+The `docker-compose.yml` defines two services:
+
+#### Backend Service
+
+- **Container Name**: `mini-wolverine-backend-dev`
+- **Port**: `4000:4000`
+- **Hot Reload**: Yes (nodemon watches `backend/src/`)
+- **Volumes**:
+  - `./backend/src:/app/src` - Source code (hot reload)
+  - `./backend/public:/app/public` - Public assets
+  - `/app/node_modules` - Dependencies (excluded from host)
+
+#### Vue Frontend Service
+
+- **Container Name**: `mini-wolverine-vue-dev`
+- **Port**: `3002:3002`
+- **Hot Reload**: Yes (Vite HMR watches `frontend-vue/src/`)
+- **Volumes**:
+  - `./frontend-vue/src:/app/src` - Source code (hot reload)
+  - `./frontend-vue/public:/app/public` - Public assets
+  - `/app/node_modules` - Dependencies (excluded from host)
+
+### Troubleshooting
+
+#### Services Won't Start
+
+```bash
+# Check logs for errors
+docker compose logs
+
+# Verify Docker is running
+docker ps
+
+# Check port availability
+lsof -i :4000
+lsof -i :3002
+```
+
+#### CAITLYN_TOKEN Issues
+
+```bash
+# Verify token is set
+docker compose config | grep CAITLYN_TOKEN
+
+# Check if backend can connect
+docker compose logs backend | grep -i "token\|auth\|connect"
+```
+
+#### Hot Reload Not Working
+
+```bash
+# Restart services
+docker compose restart
+
+# Rebuild containers
+docker compose up -d --build
+
+# Check volume mounts
+docker compose config | grep volumes
+```
+
+#### Clean Start
+
+```bash
+# Stop and remove everything
+docker compose down -v
+
+# Remove images (optional)
+docker compose down --rmi all
+
+# Start fresh
+docker compose up -d --build
+```
+
+### Production Deployment
+
+For production, use a separate production configuration:
+
+```bash
+# Build production images
+docker compose -f docker-compose.prod.yml build
+
+# Start production services
+docker compose -f docker-compose.prod.yml up -d
+```
+
+**Note**: Production configuration should use optimized builds, proper environment variables, and production-ready settings.
+
 ## 🚢 Deployment & Configuration
 
 ### Development Environment Deployment
@@ -793,18 +1239,7 @@ make backend-logs   # Backend service
 
 **Using Docker Compose:**
 
-```bash
-# Start all services
-docker compose up -d
-
-# View logs
-docker compose logs -f backend    # Backend service
-docker compose logs -f vue-app    # Vue frontend
-
-# Health check
-curl http://localhost:4000/api/health  # Backend API
-open http://localhost:3002            # Vue frontend
-```
+See the [Docker Compose Guide](#-docker-compose-guide) section above for detailed instructions.
 
 ### Production Environment Deployment
 

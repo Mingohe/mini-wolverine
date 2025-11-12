@@ -1,11 +1,25 @@
 # Mini Wolverine - Makefile for common development tasks
+#
+# ⚠️ IMPORTANT: File Caching Mechanism
+# 
+# This Makefile works with README.md and docker-compose.yml. When cloning the repository:
+# 1. If these files exist in your directory, cache them to .setup-cache/ before cloning
+# 2. After cloning, check if files exist in the repository:
+#    - If they exist → delete cache (use repo versions)
+#    - If missing → restore from cache (keep your versions)
+#
+# See README.md for detailed setup instructions.
 
-.PHONY: help start stop restart logs clean dev build test health
+.PHONY: help start stop restart logs clean dev build test health setup
 
 # Default target
 help:
 	@echo "Mini Wolverine Development Commands:"
 	@echo ""
+	@echo "Setup Commands:"
+	@echo "  make setup      - Run setup script to clone and configure repository"
+	@echo ""
+	@echo "Service Management:"
 	@echo "  make start     - Start all services in production mode"
 	@echo "  make dev       - Start services in development mode (with hot reload)"
 	@echo "  make stop      - Stop all services"
@@ -138,6 +152,27 @@ backend-logs:
 
 dev-logs:
 	docker compose logs -f dev-server
+
+# Setup command - runs setup script (cross-platform)
+setup:
+	@echo "🚀 Running setup script..."
+	@if [ -f setup.sh ]; then \
+		chmod +x setup.sh && ./setup.sh; \
+	elif [ -f setup.ps1 ]; then \
+		echo "⚠️  PowerShell script found. Please run: powershell -ExecutionPolicy Bypass -File setup.ps1"; \
+		echo "   Or use Git Bash/WSL to run setup.sh"; \
+	else \
+		echo "⚠️  Setup script not found. Detecting platform..."; \
+		if command -v powershell >/dev/null 2>&1; then \
+			echo "📥 Downloading PowerShell setup script..."; \
+			curl -o setup.ps1 https://raw.githubusercontent.com/Mingohe/mini-wolverine/dev/setup.ps1; \
+			echo "✅ Please run: powershell -ExecutionPolicy Bypass -File setup.ps1"; \
+		else \
+			echo "📥 Downloading bash setup script..."; \
+			curl -o setup.sh https://raw.githubusercontent.com/Mingohe/mini-wolverine/dev/setup.sh; \
+			chmod +x setup.sh && ./setup.sh; \
+		fi \
+	fi
 
 # Quick commands
 up: start

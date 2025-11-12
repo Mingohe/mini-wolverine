@@ -1,3 +1,22 @@
+# Mini Wolverine - Docker Compose Configuration
+#
+# ⚠️ IMPORTANT: File Caching Mechanism
+#
+# This file (docker-compose.yml) is part of the essential setup files along with
+# README.md and Makefile. When cloning the repository:
+#
+# 1. Before cloning: If this file exists in your directory, it will be cached to
+#    .setup-cache/docker-compose.yml
+#
+# 2. After cloning: 
+#    - If docker-compose.yml exists in the cloned repository → delete cache
+#      (use repository version)
+#    - If docker-compose.yml is missing in the cloned repository → restore from
+#      cache (keep your version)
+#
+# This ensures you don't lose important configuration during setup.
+# See README.md for detailed setup instructions.
+
 services:
   # Backend Server
   backend:
@@ -11,9 +30,9 @@ services:
       - PORT=4000
       - LOG_LEVEL=info
       - CAITLYN_WS_URL=wss://116.wolverine-box.com/tm
-      # ⚠️ 重要：请设置你的实际 CAITLYN_TOKEN
-      # 可以通过环境变量设置：export CAITLYN_TOKEN=your_token_here
-      # 或创建 .env 文件：echo "CAITLYN_TOKEN=your_token_here" > .env
+      # ⚠️ IMPORTANT: Set your CAITLYN_TOKEN in .env file
+      # The setup script creates .env file automatically
+      # Edit .env file and replace 'your_caitlyn_token_here' with your actual token
       - CAITLYN_TOKEN=${CAITLYN_TOKEN}
     volumes:
       - ./backend/src:/app/src
@@ -21,27 +40,6 @@ services:
       - /app/node_modules
     restart: unless-stopped
     
-  # React Development Server
-  react-app:
-    build:
-      context: ./frontend-react
-      dockerfile: Dockerfile.dev
-    container_name: mini-wolverine-react-dev
-    ports:
-      - "3000:3000"
-    environment:
-      - CHOKIDAR_USEPOLLING=true
-      - REACT_APP_BACKEND_WS_URL=ws://localhost:4000
-    volumes:
-      - ./frontend-react/src:/app/src
-      - ./frontend-react/public:/app/public
-      - /app/node_modules
-    depends_on:
-      - backend
-    stdin_open: true
-    tty: true
-    restart: unless-stopped
-
   # Vue Development Server
   vue-app:
     build:
