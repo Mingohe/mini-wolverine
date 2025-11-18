@@ -262,6 +262,8 @@ const selectedSuggestionIndex = ref<number>(0)
 const autocompleteStyle = ref<{ top: string; left: string }>({ top: '0px', left: '0px' })
 const autocompleteLoading = ref<boolean>(false)
 let autocompleteDebounceTimer: number | null = null
+// 标志：是否应该跳过自动补全（用于程序化设置值，如 loadExample）
+let skipAutocomplete = false
 
 // 验证保存名称格式
 const canSave = computed(() => {
@@ -378,6 +380,13 @@ const onDSLInput = () => {
     isValid.value = true
   }
 
+  // 如果是程序化设置（如 loadExample），跳过自动补全
+  if (skipAutocomplete) {
+    skipAutocomplete = false
+    hideAutocomplete()
+    return
+  }
+
   // 触发自动补全检查
   checkAutocomplete()
 }
@@ -480,13 +489,34 @@ const selectSuggestion = (suggestion: AutocompleteSuggestion) => {
   
   // 根据当前段类型确定替换范围
   if (context.currentSegment === 'command') {
-    replaceStart = 0
-    replaceEnd = 0
-  } else if (context.currentSegment === 'namespace') {
-    const match = dslInput.value.substring(0, textarea.selectionStart).match(/(fc|ft|fm):$/)
-    if (match) {
-      replaceStart = match.index! + match[0].length
+    // 对于 command，替换从开头到光标位置之间的所有内容（可能是 fc, ft, fm 等）
+    // 需要匹配可能包含或不包含 : 的情况
+    const beforeCursor = dslInput.value.substring(0, textarea.selectionStart)
+    const commandMatch = beforeCursor.match(/^(fc|ft|fm):?$/)
+    if (commandMatch) {
+      replaceStart = 0
       replaceEnd = textarea.selectionStart
+    } else {
+      // 如果没有匹配到，说明可能输入了其他内容，替换从开头到光标的所有内容
+      replaceStart = 0
+      replaceEnd = textarea.selectionStart
+    }
+  } else if (context.currentSegment === 'namespace') {
+    // 对于 namespace，替换 : 之后到光标位置之间的内容
+    // 需要匹配可能包含或不包含 :: 的情况
+    const beforeCursor = dslInput.value.substring(0, textarea.selectionStart)
+    const namespaceMatch = beforeCursor.match(/(fc|ft|fm):(global|private)?:?$/)
+    if (namespaceMatch) {
+      // 从 : 之后开始替换（包括可能已经输入的 global/private 和 ::）
+      replaceStart = namespaceMatch.index! + namespaceMatch[1].length + 1 // +1 for ':'
+      replaceEnd = textarea.selectionStart
+    } else {
+      // 如果没有匹配到，尝试匹配 : 之后的内容
+      const simpleMatch = beforeCursor.match(/(fc|ft|fm):(.*)$/)
+      if (simpleMatch) {
+        replaceStart = simpleMatch.index! + simpleMatch[1].length + 1
+        replaceEnd = textarea.selectionStart
+      }
     }
   } else if (context.currentSegment === 'indicator' || context.currentSegment === 'formula') {
     // 对于指标，匹配从 namespace 之后到 [、| 或光标位置之间的所有内容（包括可能已输入的 @ 和版本号）
@@ -535,8 +565,22 @@ const selectSuggestion = (suggestion: AutocompleteSuggestion) => {
   const insertText = suggestion.text
 
   // 根据段类型添加必要的分隔符
+  // 注意：dslAutocomplete 返回的 text 可能已经包含分隔符（如 'fc:', 'global::'）
+  // 我们需要检查并确保分隔符正确
   let finalText = insertText
-  if (context.currentSegment === 'market') {
+  if (context.currentSegment === 'command') {
+    // command 的 text 已经是 'fc:', 'ft:', 'fm:'，不需要再添加
+    // 但如果用户输入了 'fc' 没有 ':'，我们需要确保有 ':'
+    if (!insertText.endsWith(':')) {
+      finalText = insertText + ':'
+    }
+  } else if (context.currentSegment === 'namespace') {
+    // namespace 的 text 已经是 'global::', 'private::'，不需要再添加
+    // 但如果用户输入了 'global' 没有 '::'，我们需要确保有 '::'
+    if (!insertText.endsWith('::')) {
+      finalText = insertText + '::'
+    }
+  } else if (context.currentSegment === 'market') {
     finalText = insertText + ':'
   } else if (context.currentSegment === 'code') {
     finalText = insertText + ']'
@@ -676,10 +720,12 @@ const executeQuery = async () => {
 
 // 清除输入
 const clearInput = () => {
+  skipAutocomplete = true // 标记为程序化设置，跳过自动补全
   dslInput.value = ''
   parseError.value = null
   isValid.value = false
   queryResult.value = null
+  hideAutocomplete()
 }
 
 // 复制 DSL
@@ -690,8 +736,13 @@ const copyDSL = () => {
 
 // 加载示例
 const loadExample = () => {
+  skipAutocomplete = true // 标记为程序化设置，跳过自动补全
   dslInput.value = 'fc:global::SampleQuote@0[CZCE:ap<00>] | 1h | 2025-11-05..2025-11-06'
   onDSLInput()
+  // 确保隐藏自动补全（双重保险）
+  nextTick(() => {
+    hideAutocomplete()
+  })
 }
 
 // 保存查询
@@ -720,18 +771,28 @@ const saveQuery = () => {
 
 // 加载查询
 const loadQuery = (query: SavedQuery) => {
+  skipAutocomplete = true // 标记为程序化设置，跳过自动补全
   dslInput.value = query.dsl
   query.lastUsedAt = Date.now()
   query.usageCount = (query.usageCount || 0) + 1
   saveToStorage()
   onDSLInput()
+  // 确保隐藏自动补全
+  nextTick(() => {
+    hideAutocomplete()
+  })
 }
 
 // 编辑查询
 const editQuery = (query: SavedQuery) => {
+  skipAutocomplete = true // 标记为程序化设置，跳过自动补全
   dslInput.value = query.dsl
   saveQueryName.value = query.name
   onDSLInput()
+  // 确保隐藏自动补全
+  nextTick(() => {
+    hideAutocomplete()
+  })
   showSaveDialog.value = true
 }
 
